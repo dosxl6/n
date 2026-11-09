@@ -1,3 +1,630 @@
+-- SIEXTHER: liquid glass from VIPUNIV.lua; original feature code follows below.
+do
+    local environment = (type(getgenv) == "function" and getgenv()) or _G
+    if not environment.__SIEXTHER_VIP_GLASS_V1 then
+        environment.__SIEXTHER_VIP_GLASS_V1 = (function()
+            -- SIEXTHER / VIP UNIV liquid glass.
+            -- The palette, surface(), edge/fill gradients and blur strength come from VIPUNIV.lua.
+            -- This module owns only ScreenGuis constructed through its private Instance facade.
+            -- It does not hook Roblox globals or restyle the game's own interface.
+            local nativeInstance = Instance
+            local nativeLoadString = loadstring
+            local nativeGetEnvironment = getfenv
+            local nativeSetEnvironment = setfenv
+            local scheduler = task
+            local TweenService = game:GetService("TweenService")
+            local Lighting = game:GetService("Lighting")
+            
+            local Glass = {
+                Version = "VIPUNIV-1.0",
+                primaryColor = Color3.fromRGB(70, 130, 255),
+                accentColor = Color3.fromRGB(100, 200, 255),
+                bgColor = Color3.fromRGB(43, 62, 91),
+                buttonColor = Color3.fromRGB(219, 232, 255),
+                textColor = Color3.fromRGB(255, 255, 255),
+                panelTransparency = 0.48,
+                cardTransparency = 0.88,
+                blurSize = 18,
+            }
+            local prefix = "__VIPGlass_"
+            local roots = {}
+            local objects = setmetatable({}, {__mode = "k"})
+            local environmentCache = setmetatable({}, {__mode = "k"})
+            local blur, blurTween, blurTarget
+            local refreshQueued = false
+            local styleObject, queueObject, refreshBlur
+            
+            local function own(object)
+                return object.Name:sub(1, #prefix) == prefix
+            end
+            local function put(record, property, value)
+                record.output[property] = value
+                if record.object[property] ~= value then record.object[property] = value end
+            end
+            local function namedChild(object, class, name)
+                local child = object:FindFirstChild(name)
+                if not child then
+                    child = nativeInstance.new(class)
+                    child.Name = name
+                    child.Parent = object
+                end
+                return child
+            end
+            local function gradient(object, name, rotation, colors, alpha)
+                local existing = object:FindFirstChild(prefix .. name)
+                if existing then return existing end
+                local fill = namedChild(object, "UIGradient", prefix .. name)
+                fill.Rotation = rotation
+                fill.Color = ColorSequence.new(colors)
+                if alpha then fill.Transparency = NumberSequence.new(alpha) end
+                return fill
+            end
+            local function visible(object, root)
+                if not root.Parent or not root.Enabled then return false end
+                local parent = object
+                while parent and parent ~= root do
+                    if parent:IsA("GuiObject") and not parent.Visible then return false end
+                    parent = parent.Parent
+                end
+                return parent == root
+            end
+            local function dimensions(object)
+                local size, absolute = object.Size, object.AbsoluteSize
+                local width = absolute.X > 0 and absolute.X or size.X.Offset
+                local height = absolute.Y > 0 and absolute.Y or size.Y.Offset
+                return width, height
+            end
+            local function hasLayout(object)
+                return object:FindFirstChildOfClass("UIListLayout")
+                    or object:FindFirstChildOfClass("UIGridLayout")
+                    or object:FindFirstChildOfClass("UIPageLayout")
+                    or object:FindFirstChildOfClass("UITableLayout")
+            end
+            local function skip(object, root)
+                -- Reticles, radar artwork, sampled colors and viewport renders are content, not panels.
+                if root:GetAttribute("VIPGlassIgnore") then return true end
+                local rootName = root.Name:lower()
+                if rootName == "hannsiexther_crosshair" or rootName == "explorerselections"
+                    or rootName == "alignindicator" then return true end
+                local current = object
+                while current and current ~= root do
+                    if current:GetAttribute("VIPGlassIgnore") or current:IsA("ViewportFrame")
+                        or current:IsA("BillboardGui") or current:IsA("SurfaceGui")
+                        or own(current) then return true end
+                    local name = current.Name:lower()
+                    if name == "crosshairpreview" or name == "crosshaircanvas"
+                        or name == "radarcanvas" or name == "radarmap"
+                        or name == "hue" or name == "saturation" or name == "colorwheel"
+                        or name == "colorchoice" or name:find("swatch", 1, true)
+                        or name == "syntaxhighlight" then return true end
+                    current = current.Parent
+                end
+                return false
+            end
+            local function saturated(color)
+                local _, saturation, value = color:ToHSV()
+                return saturation > 0.32 and value > 0.22
+            end
+            local function statusColor(color)
+                local h, s, v = color:ToHSV()
+                return s > 0.4 and v > 0.55 and (h < 0.17 or (h > 0.2 and h < 0.48) or h > 0.95)
+            end
+            local function hasOpaqueAncestor(object, root)
+                local parent = object.Parent
+                while parent and parent ~= root do
+                    if parent:IsA("GuiObject") then
+                        local record = objects[parent]
+                        local alpha = record and record.source.BackgroundTransparency or parent.BackgroundTransparency
+                        if alpha < 1 then return true end
+                    end
+                    parent = parent.Parent
+                end
+                return false
+            end
+            
+            -- Adapted directly from settings.Glass.surface in VIPUNIV.lua.
+            function Glass.surface(object, transparency, radius, edge)
+                object.BackgroundTransparency = transparency
+                object.BorderSizePixel = 0
+                local corner = object:FindFirstChildOfClass("UICorner")
+                if not corner then corner = namedChild(object, "UICorner", prefix .. "Corner") end
+                corner.CornerRadius = UDim.new(0, radius)
+                local stroke = namedChild(object, "UIStroke", prefix .. "Edge")
+                stroke.Enabled = true
+                stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                stroke.Color = Glass.primaryColor
+                stroke.Thickness = radius >= 20 and 1.6 or 1
+                stroke.Transparency = edge or 0.78
+                gradient(stroke, "GlassEdge", 125, {
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(133, 184, 255)),
+                    ColorSequenceKeypoint.new(0.35, Glass.primaryColor),
+                    ColorSequenceKeypoint.new(0.75, Color3.fromRGB(55, 108, 211)),
+                    ColorSequenceKeypoint.new(1, Color3.fromRGB(139, 194, 255)),
+                }, {
+                    NumberSequenceKeypoint.new(0, 0),
+                    NumberSequenceKeypoint.new(0.38, 0.36),
+                    NumberSequenceKeypoint.new(0.72, 0.78),
+                    NumberSequenceKeypoint.new(1, 0.12),
+                })
+            end
+            local function fill(record, panel)
+                local object = record.object
+                for _, child in ipairs(object:GetChildren()) do
+                    if child:IsA("UIGradient") and not own(child) then child.Enabled = false end
+                end
+                local tint
+                if panel then
+                    tint = gradient(object, "GlassTint", 100, {
+                        ColorSequenceKeypoint.new(0, Color3.fromRGB(230, 244, 255)),
+                        ColorSequenceKeypoint.new(0.42, Color3.fromRGB(148, 185, 233)),
+                        ColorSequenceKeypoint.new(1, Color3.fromRGB(209, 231, 255)),
+                    })
+                else
+                    tint = gradient(object, "GlassFill", 105, {
+                        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+                        ColorSequenceKeypoint.new(0.48, Color3.fromRGB(183, 207, 243)),
+                        ColorSequenceKeypoint.new(1, Color3.fromRGB(235, 244, 255)),
+                    })
+                end
+                tint.Enabled = true
+                return tint
+            end
+            local function clearSurface(record)
+                local object = record.object
+                for _, name in ipairs({"Edge", "GlassTint", "GlassFill"}) do
+                    local child = object:FindFirstChild(prefix .. name)
+                    if child then child.Enabled = false end
+                end
+            end
+            local function stopSheen(record)
+                if record.sweep then record.sweep:Cancel(); record.sweep = nil end
+                if record.sheen then record.sheen:Destroy(); record.sheen = nil end
+                if record.rim then record.rim:Destroy(); record.rim = nil end
+            end
+            local function panelDetail(record)
+                local object = record.object
+                -- Extra GuiObjects must never become entries in an existing automatic layout.
+                if hasLayout(object) then stopSheen(record); return end
+                if not record.rim then
+                    local rim = namedChild(object, "Frame", prefix .. "LiquidInnerRim")
+                    rim.Active = false
+                    rim.Selectable = false
+                    rim.Size = UDim2.new(1, -6, 1, -6)
+                    rim.Position = UDim2.new(0, 3, 0, 3)
+                    rim.BackgroundTransparency = 1
+                    rim.BorderSizePixel = 0
+                    rim.ZIndex = object.ZIndex
+                    namedChild(rim, "UICorner", prefix .. "Corner").CornerRadius = UDim.new(0, 19)
+                    local stroke = namedChild(rim, "UIStroke", prefix .. "RimEdge")
+                    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                    stroke.Color = Color3.fromRGB(146, 193, 255)
+                    stroke.Transparency = 0.77
+                    stroke.Thickness = 1
+                    gradient(stroke, "RimShine", 105, {
+                        ColorSequenceKeypoint.new(0, Glass.textColor),
+                        ColorSequenceKeypoint.new(1, Glass.textColor),
+                    }, {
+                        NumberSequenceKeypoint.new(0, 0.08),
+                        NumberSequenceKeypoint.new(0.48, 0.85),
+                        NumberSequenceKeypoint.new(1, 0.26),
+                    })
+                    record.rim = rim
+                end
+                -- VIP UNIV's clipped light sweep; do not enable clipping on an existing popup host.
+                if object.ClipsDescendants and not record.sheen then
+                    local sheen = namedChild(object, "Frame", prefix .. "LiquidSheen")
+                    sheen.Active = false
+                    sheen.Selectable = false
+                    sheen.Position = UDim2.new(0, -90, 0, 0)
+                    sheen.Size = UDim2.new(0, 92, 1, 0)
+                    sheen.Rotation = -12
+                    sheen.BackgroundColor3 = Color3.fromRGB(178, 219, 255)
+                    sheen.BackgroundTransparency = 0.95
+                    sheen.BorderSizePixel = 0
+                    sheen.ZIndex = object.ZIndex
+                    gradient(sheen, "SheenFade", 0, {
+                        ColorSequenceKeypoint.new(0, Glass.textColor),
+                        ColorSequenceKeypoint.new(1, Glass.textColor),
+                    }, {
+                        NumberSequenceKeypoint.new(0, 1),
+                        NumberSequenceKeypoint.new(0.45, 0.18),
+                        NumberSequenceKeypoint.new(0.55, 0.18),
+                        NumberSequenceKeypoint.new(1, 1),
+                    })
+                    record.sheen = sheen
+                    record.sweep = TweenService:Create(sheen,
+                        TweenInfo.new(1.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, false, 7),
+                        {Position = UDim2.new(1, 60, 0, 0)})
+                end
+                if record.sweep then
+                    if visible(object, record.root) then record.sweep:Play() else record.sweep:Pause() end
+                end
+            end
+            local function shadow(record)
+                local object = record.object
+                if object.Parent ~= record.root or hasLayout(record.root) then return end
+                -- Global ZIndex layouts may place their text at level 1. Never raise their panel over it.
+                if object.ZIndex <= 1 and record.root.ZIndexBehavior == Enum.ZIndexBehavior.Global then return end
+                if not record.shadow then
+                    local holder = namedChild(record.root, "Frame", prefix .. "Shadow_" .. tostring(record.id))
+                    holder.Active = false
+                    holder.Selectable = false
+                    holder.BackgroundTransparency = 1
+                    holder.BorderSizePixel = 0
+                    holder.ZIndex = math.max(1, object.ZIndex - 1)
+                    if object.ZIndex == 1 then put(record, "ZIndex", 2) end
+                    for i = 1, 5 do
+                        local layer = nativeInstance.new("Frame")
+                        layer.Name = prefix .. "ShadowLayer"
+                        layer.Active = false
+                        layer.AnchorPoint = Vector2.new(0.5, 0.5)
+                        layer.Position = UDim2.new(0.5, 0, 0.5, 5)
+                        layer.Size = UDim2.new(1, i * 5, 1, i * 5)
+                        layer.BackgroundColor3 = Color3.fromRGB(4, 8, 18)
+                        layer.BackgroundTransparency = 0.96
+                        layer.BorderSizePixel = 0
+                        layer.ZIndex = holder.ZIndex
+                        namedChild(layer, "UICorner", prefix .. "Corner").CornerRadius = UDim.new(0, 22 + i * 2)
+                        layer.Parent = holder
+                    end
+                    record.shadow = holder
+                end
+                local holder = record.shadow
+                holder.Position = object.Position
+                holder.Size = object.Size
+                holder.AnchorPoint = object.AnchorPoint
+                holder.Visible = visible(object, record.root)
+                holder.ZIndex = math.max(1, object.ZIndex - 1)
+                local scale = object:FindFirstChildOfClass("UIScale")
+                local copy = holder:FindFirstChildOfClass("UIScale")
+                if scale then
+                    copy = copy or namedChild(holder, "UIScale", prefix .. "Scale")
+                    copy.Scale = scale.Scale
+                elseif copy then copy.Scale = 1 end
+            end
+            local function setPanel(record, isPanel)
+                record.panel = isPanel
+                local state = roots[record.root]
+                if state then state.panels[record.object] = isPanel and record or nil end
+                if isPanel then panelDetail(record); shadow(record)
+                else
+                    stopSheen(record)
+                    if record.shadow then record.shadow:Destroy(); record.shadow = nil end
+                end
+            end
+            local function watch(record, signal, callback)
+                record.connections[#record.connections + 1] = signal:Connect(callback)
+            end
+            local function dispose(record)
+                if record.dead then return end
+                record.dead = true
+                for _, connection in ipairs(record.connections) do connection:Disconnect() end
+                record.connections = {}
+                stopSheen(record)
+                if record.shadow then record.shadow:Destroy(); record.shadow = nil end
+                objects[record.object] = nil
+                local root = roots[record.root]
+                if root then root.objects[record.object] = nil; root.panels[record.object] = nil end
+            end
+            
+            styleObject = function(record)
+                local object, root = record.object, record.root
+                if record.dead or not object.Parent or not object:IsDescendantOf(root) or skip(object, root) then
+                    if record.panel then setPanel(record, false) end
+                    return
+                end
+                local source = record.source
+                local width, height = dimensions(object)
+                local name = object.Name:lower()
+                local text = object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox")
+                local image = object:IsA("ImageLabel") or object:IsA("ImageButton")
+                local button = object:IsA("GuiButton")
+                local imageSurface = image and height >= 64 and object.Image ~= ""
+                    and not name:find("shadow", 1, true) and not name:find("glow", 1, true)
+                    and (object.ScaleType == Enum.ScaleType.Slice or name == "main" or name == "window"
+                        or name == "background" or name == "mainframe")
+                record.writing = true
+                put(record, "BorderSizePixel", 0)
+                if text then
+                    -- Code editors and ASCII diagrams need their original character widths.
+                    if source.Font ~= Enum.Font.Code and source.Font ~= Enum.Font.RobotoMono then
+                        put(record, "Font", Enum.Font.GothamBold)
+                    end
+                    put(record, "TextColor3", statusColor(source.TextColor3) and source.TextColor3 or Glass.textColor)
+                    put(record, "TextStrokeTransparency", 1)
+                    if object:IsA("TextBox") then put(record, "PlaceholderColor3", Color3.fromRGB(180, 191, 210)) end
+                    for _, child in ipairs(object:GetChildren()) do
+                        if child:IsA("UIGradient") and not own(child) then
+                            child.Color = ColorSequence.new({
+                                ColorSequenceKeypoint.new(0, Glass.textColor),
+                                ColorSequenceKeypoint.new(0.3, Glass.primaryColor),
+                                ColorSequenceKeypoint.new(0.6, Glass.primaryColor),
+                                ColorSequenceKeypoint.new(1, Glass.textColor),
+                            })
+                        end
+                    end
+                end
+                if object:IsA("ScrollingFrame") then
+                    put(record, "ScrollBarImageColor3", Glass.primaryColor)
+                    put(record, "ScrollBarThickness", math.min(source.ScrollBarThickness, 4))
+                end
+                if button then put(record, "AutoButtonColor", false) end
+                -- Sprite sheets, profile pictures and artwork keep their image colors and gradients.
+                if image and object.Image ~= "" and not imageSurface then
+                    setPanel(record, false)
+                    if source.BackgroundTransparency < 1 then
+                        put(record, "BackgroundColor3", Glass.buttonColor)
+                        put(record, "BackgroundTransparency", Glass.cardTransparency)
+                        record.output.BackgroundTransparency = Glass.cardTransparency
+                        Glass.surface(object, Glass.cardTransparency, 11, 0.62)
+                    end
+                    record.writing = false
+                    return
+                end
+                local transparent = not imageSurface and source.BackgroundTransparency >= 1
+                local compact = object.Size.Y.Scale == 0 and height > 0 and height <= 10
+                local knob = name:find("knob", 1, true) or name:find("dragger", 1, true)
+                    or name:find("thumb", 1, true) or name == "toggleindicator"
+                local track = (name:find("switch", 1, true) or name:find("toggle", 1, true))
+                    and width <= 70 and height <= 30
+                if not track and button and text and object.Text == "" and width > 22 and width <= 65
+                    and height > 12 and height <= 28 and #object:GetChildren() > 0 then track = true end
+                local panel = not transparent and (object:IsA("Frame") or imageSurface) and not object:IsA("ScrollingFrame")
+                    and not compact and not knob and not track
+                    and (((not hasOpaqueAncestor(object, root)) and (height >= 64 or object.Size.Y.Scale > 0))
+                        or ((name:find("popup", 1, true) or name:find("modal", 1, true)
+                            or name == "mainframe" or name == "window") and height >= 64))
+                if imageSurface then put(record, "ImageTransparency", 1) end
+                setPanel(record, panel)
+                if transparent then
+                    clearSurface(record)
+                    put(record, "BackgroundTransparency", 1)
+                elseif compact or knob or track then
+                    clearSurface(record)
+                    local active = saturated(source.BackgroundColor3)
+                    local color = knob and Glass.textColor or (active and Glass.primaryColor or Color3.fromRGB(176, 189, 211))
+                    local alpha = knob and 0 or (track and (active and 0.08 or 0.7) or (active and 0 or 0.8))
+                    put(record, "BackgroundColor3", color)
+                    put(record, "BackgroundTransparency", alpha)
+                    local corner = object:FindFirstChildOfClass("UICorner")
+                    if corner then corner.CornerRadius = UDim.new(1, 0) end
+                else
+                    local active = not panel and button and saturated(source.BackgroundColor3)
+                    local section = not panel and (name:find("sidebar", 1, true) or name:find("header", 1, true)
+                        or name == "topbar" or name == "titlebar" or name == "sxthr")
+                    local search = object:IsA("TextBox") or name:find("search", 1, true)
+                    local alpha = panel and Glass.panelTransparency or (active and 0.28 or (section and 0.94 or (search and 0.9 or Glass.cardTransparency)))
+                    local color = panel and Glass.bgColor or (active and Glass.primaryColor or Glass.buttonColor)
+                    put(record, "BackgroundColor3", color)
+                    put(record, "BackgroundTransparency", record.hovering and not panel and math.min(alpha, 0.84) or alpha)
+                    local actualAlpha = record.output.BackgroundTransparency
+                    Glass.surface(object, actualAlpha, panel and 22 or (search and 12 or 11), panel and 0.18 or 0.62)
+                    record.output.BackgroundTransparency = actualAlpha
+                    fill(record, panel)
+                end
+                for _, child in ipairs(object:GetChildren()) do
+                    if child:IsA("UIStroke") and not own(child) then child.Enabled = false end
+                end
+                record.writing = false
+            end
+            
+            queueObject = function(root, object)
+                local state = roots[root]
+                if not state or state.dead or own(object) then return end
+                if not object:IsA("GuiObject") then
+                    if object.Parent and object.Parent:IsA("GuiObject") then queueObject(root, object.Parent) end
+                    return
+                end
+                if skip(object, root) then return end
+                local record = objects[object]
+                if record and record.root ~= root then dispose(record); record = nil end
+                if not record then
+                    state.serial = state.serial + 1
+                    record = {object = object, root = root, source = {}, output = {}, connections = {}, id = state.serial}
+                    objects[object] = record
+                    state.objects[object] = record
+                    local properties = {"BackgroundColor3", "BackgroundTransparency", "BorderSizePixel"}
+                    if object:IsA("TextLabel") or object:IsA("TextBox") or object:IsA("TextButton") then
+                        for _, property in ipairs({"TextColor3", "Font", "TextStrokeTransparency"}) do
+                            properties[#properties + 1] = property
+                        end
+                    end
+                    if object:IsA("ScrollingFrame") then
+                        properties[#properties + 1] = "ScrollBarImageColor3"
+                        properties[#properties + 1] = "ScrollBarThickness"
+                    end
+                    for _, property in ipairs(properties) do
+                        record.source[property] = object[property]
+                        watch(record, object:GetPropertyChangedSignal(property), function()
+                            if record.dead or record.writing or object[property] == record.output[property] then return end
+                            record.source[property] = object[property]
+                            queueObject(root, object)
+                        end)
+                    end
+                    for _, property in ipairs({"Visible", "Size", "AbsoluteSize", "ClipsDescendants", "Name"}) do
+                        watch(record, object:GetPropertyChangedSignal(property), function()
+                            if not record.dead then queueObject(root, object); refreshBlur() end
+                        end)
+                    end
+                    for _, property in ipairs({"Position", "AnchorPoint"}) do
+                        watch(record, object:GetPropertyChangedSignal(property), function()
+                            if not record.dead and record.panel then shadow(record) end
+                        end)
+                    end
+                    watch(record, object.Destroying, function() dispose(record); refreshBlur() end)
+                    if object:IsA("GuiButton") then
+                        watch(record, object.MouseEnter, function() record.hovering = true; queueObject(root, object) end)
+                        watch(record, object.MouseLeave, function() record.hovering = false; queueObject(root, object) end)
+                    end
+                end
+                state.pending[object] = record
+                if state.queued then return end
+                state.queued = true
+                scheduler.defer(function()
+                    if state.dead then return end
+                    state.queued = false
+                    local pending = state.pending
+                    state.pending = {}
+                    local count = 0
+                    for _, item in pairs(pending) do
+                        if not item.dead then styleObject(item) end
+                        count = count + 1
+                        if count % 80 == 0 then scheduler.wait() end
+                    end
+                    refreshBlur()
+                end)
+            end
+            
+            refreshBlur = function()
+                if refreshQueued then return end
+                refreshQueued = true
+                scheduler.defer(function()
+                    refreshQueued = false
+                    local active, any = false, false
+                    for root, state in pairs(roots) do
+                        if not state.dead then
+                            any = true
+                            for _, record in pairs(state.panels) do
+                                if record.panel and not record.dead then
+                                    local _, height = dimensions(record.object)
+                                    local shown = visible(record.object, root)
+                                    if record.shadow then record.shadow.Visible = shown end
+                                    if record.sweep then
+                                        if shown then record.sweep:Play() else record.sweep:Pause() end
+                                    end
+                                    if shown and height >= 64 then active = true end
+                                end
+                            end
+                        end
+                    end
+                    if not any then
+                        if blurTween then blurTween:Cancel(); blurTween = nil end
+                        if blur then blur:Destroy(); blur = nil end
+                        blurTarget = nil
+                        return
+                    end
+                    if not active and not blur then return end
+                    if not blur or not blur.Parent then
+                        blur = nativeInstance.new("BlurEffect")
+                        blur.Name = prefix .. "Blur"
+                        blur.Size = 0
+                        blur.Parent = Lighting
+                        blurTarget = nil
+                    end
+                    local target = active and Glass.blurSize or 0
+                    if target == blurTarget then return end
+                    blurTarget = target
+                    if blurTween then blurTween:Cancel() end
+                    blurTween = TweenService:Create(blur, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {Size = target})
+                    blurTween:Play()
+                end)
+            end
+            
+            function Glass.attach(root)
+                if not root:IsA("ScreenGui") or roots[root] then return root end
+                local state = {objects = {}, panels = {}, pending = {}, connections = {}, serial = 0}
+                roots[root] = state
+                local function connect(signal, callback)
+                    state.connections[#state.connections + 1] = signal:Connect(callback)
+                end
+                local function scan()
+                    if state.dead then return end
+                    for _, object in ipairs(root:GetDescendants()) do
+                        if not own(object) then queueObject(root, object) end
+                    end
+                    refreshBlur()
+                end
+                connect(root.DescendantAdded, function(object)
+                    queueObject(root, object)
+                    if object:IsA("UIScale") then
+                        connect(object:GetPropertyChangedSignal("Scale"), function()
+                            if object.Parent then queueObject(root, object.Parent) end
+                        end)
+                    end
+                end)
+                connect(root.DescendantRemoving, function(object)
+                    local record = objects[object]
+                    if record and record.root == root then
+                        scheduler.defer(function()
+                            if not record.dead and not object:IsDescendantOf(root) then dispose(record); refreshBlur() end
+                        end)
+                    end
+                end)
+                connect(root:GetPropertyChangedSignal("Enabled"), refreshBlur)
+                connect(root:GetPropertyChangedSignal("Name"), scan)
+                connect(root.AncestryChanged, refreshBlur)
+                connect(root.Destroying, function()
+                    state.dead = true
+                    for _, connection in ipairs(state.connections) do connection:Disconnect() end
+                    local toRemove = {}
+                    for _, record in pairs(state.objects) do toRemove[#toRemove + 1] = record end
+                    for _, record in ipairs(toRemove) do dispose(record) end
+                    roots[root] = nil
+                    refreshBlur()
+                end)
+                scheduler.defer(scan)
+                return root
+            end
+            
+            Glass.Instance = setmetatable({}, {__index = nativeInstance})
+            function Glass.Instance.new(class, parent)
+                local object = nativeInstance.new(class)
+                if class == "ScreenGui" then Glass.attach(object) end
+                if parent then object.Parent = parent end
+                return object
+            end
+            
+            local function environmentFor(base)
+                base = base or _G
+                local cached = environmentCache[base]
+                if cached then return cached end
+                local wrapped = setmetatable({}, {
+                    __index = function(_, key)
+                        if key == "Instance" then return Glass.Instance end
+                        if key == "loadstring" then return Glass.LoadString end
+                        if key == "getfenv" then return Glass.GetEnvironment end
+                        return base[key]
+                    end,
+                    __newindex = function(_, key, value) base[key] = value end,
+                })
+                environmentCache[base] = wrapped
+                environmentCache[wrapped] = wrapped
+                return wrapped
+            end
+            function Glass.GetEnvironment(level)
+                local base
+                if nativeGetEnvironment then
+                    if level == nil then base = nativeGetEnvironment(2)
+                    elseif type(level) == "number" then base = nativeGetEnvironment(level == 0 and 0 or level + 1)
+                    else base = nativeGetEnvironment(level) end
+                end
+                return environmentFor(base)
+            end
+            function Glass.LoadString(source, chunkName)
+                local compiled, message = nativeLoadString(source, chunkName)
+                if compiled and nativeSetEnvironment then
+                    local base = nativeGetEnvironment and nativeGetEnvironment(compiled) or _G
+                    nativeSetEnvironment(compiled, environmentFor(base))
+                end
+                return compiled, message
+            end
+            
+            -- A few original menus use their old paint colors as selection state.
+            -- Those comparisons must keep reading the source value after a glass repaint.
+            function Glass.Read(object, property)
+                local record = objects[object]
+                if record and record.source[property] ~= nil and object[property] == record.output[property] then
+                    return record.source[property]
+                end
+                return object[property]
+            end
+            
+            return Glass
+        end)()
+    end
+    __SIEXTHER_VIP_GLASS_V1 = environment.__SIEXTHER_VIP_GLASS_V1
+end
+-- BEGIN ORIGINAL FEATURE CODE (GUI construction uses the VIP UNIV theme).
 -- https://github.com/LorekeeperZinnia/Dex
 
 --[[
@@ -74,7 +701,7 @@ local EmbeddedModules = {
 			local getDescendants = game.GetDescendants
 			local getTextSize = service.TextService.GetTextSize
 			local updateDebounce,refreshDebounce = false,false
-			local nilNode = {Obj = Instance.new("Folder")}
+			local nilNode = {Obj = __SIEXTHER_VIP_GLASS_V1.Instance.new("Folder")}
 			local idCounter = 0
 			local scrollV,scrollH,clipboard
 			local renameBox,renamingNode,searchFunc
@@ -493,7 +1120,7 @@ local EmbeddedModules = {
 					end
 				end
 
-				local newGui = Instance.new("ScreenGui")
+				local newGui = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScreenGui")
 				newGui.DisplayOrder = Main.DisplayOrders.Menu
 				dragTree.Parent = newGui
 				Lib.ShowGui(newGui)
@@ -1081,7 +1708,7 @@ local EmbeddedModules = {
 					local sList = selection.List
 					if #sList == 0 then return end
 
-					local model = Instance.new("Model",sList[#sList].Obj.Parent)
+					local model = __SIEXTHER_VIP_GLASS_V1.Instance.new("Model",sList[#sList].Obj.Parent)
 					for i = 1,#sList do
 						pcall(function() sList[i].Obj.Parent = model end)
 					end
@@ -1511,7 +2138,7 @@ local EmbeddedModules = {
 			Explorer.HideNilInstances = function()
 				table.clear(nilMap)
 
-				local disconnectCon = Instance.new("Folder").ChildAdded:Connect(function() end).Disconnect
+				local disconnectCon = __SIEXTHER_VIP_GLASS_V1.Instance.new("Folder").ChildAdded:Connect(function() end).Disconnect
 				for i,v in next,nilCons do
 					disconnectCon(v[1])
 					disconnectCon(v[2])
@@ -1703,7 +2330,7 @@ local EmbeddedModules = {
 
 				local function onClick(className)
 					local sList = selection.List
-					local instNew = Instance.new
+					local instNew = __SIEXTHER_VIP_GLASS_V1.Instance.new
 					for i = 1,#sList do
 						local node = sList[i]
 						local obj = node.Obj
@@ -2072,7 +2699,7 @@ local EmbeddedModules = {
 				local isa = game.IsA
 				local clone = game.Clone
 				if not holder then
-					holder = Instance.new("ScreenGui")
+					holder = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScreenGui")
 					holder.Name = "ExplorerSelections"
 					holder.DisplayOrder = Main.DisplayOrders.Core
 					Lib.ShowGui(holder)
@@ -2088,7 +2715,7 @@ local EmbeddedModules = {
 					})
 					Explorer.SelectionVisualGui = guiTemplate
 
-					local boxTemplate = Instance.new("SelectionBox")
+					local boxTemplate = __SIEXTHER_VIP_GLASS_V1.Instance.new("SelectionBox")
 					boxTemplate.LineThickness = 0.03
 					boxTemplate.Color3 = Color3.fromRGB(0, 170, 255)
 					Explorer.SelectionVisualBox = boxTemplate
@@ -3179,7 +3806,7 @@ local EmbeddedModules = {
 			Properties.SetSoundPreview = function(soundObj,noplay)
 				local sound = Properties.PreviewSound
 				if not sound then
-					sound = Instance.new("Sound")
+					sound = __SIEXTHER_VIP_GLASS_V1.Instance.new("Sound")
 					sound.Name = "Preview"
 					sound.Paused:Connect(function()
 						local entry = Properties.GetSoundPreviewEntry()
@@ -4267,7 +4894,7 @@ local EmbeddedModules = {
 				codeFrame.Frame.Parent = window.GuiElems.Content
 
 				-- TODO: REMOVE AND MAKE BETTER
-				local copy = Instance.new("TextButton", window.GuiElems.Content)
+				local copy = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton", window.GuiElems.Content)
 				copy.BackgroundTransparency = 1
 				copy.Size = UDim2.new(0.5,0,0,20)
 				copy.Text = "Copy to Clipboard"
@@ -4278,7 +4905,7 @@ local EmbeddedModules = {
 					env.setclipboard(source)
 				end)
 
-				local save = Instance.new("TextButton",window.GuiElems.Content)
+				local save = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton",window.GuiElems.Content)
 				save.BackgroundTransparency = 1
 				save.Position = UDim2.new(0.35,0,0,0)
 				save.Size = UDim2.new(0.3,0,0,20)
@@ -4295,7 +4922,7 @@ local EmbeddedModules = {
 					end
 				end)
 
-				local dumpbtn = Instance.new("TextButton",window.GuiElems.Content)
+				local dumpbtn = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton",window.GuiElems.Content)
 				dumpbtn.BackgroundTransparency = 1
 				dumpbtn.Position = UDim2.new(0.7,0,0,0)
 				dumpbtn.Size = UDim2.new(0.3,0,0,20)
@@ -5219,7 +5846,7 @@ local EmbeddedModules = {
 				funcs.ExplorerIcons = { ["MapId"] = _MapId, ["Icons"] = _Icons }
 
 				funcs.GetLabel = function(self)
-					local label = Instance.new("ImageLabel")
+					local label = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageLabel")
 					self:SetupLabel(label)
 					return label
 				end
@@ -5271,7 +5898,7 @@ local EmbeddedModules = {
 					else
 						Frame.ClipsDescendants = true
 
-						local obj = Instance.new("ImageLabel", Frame)
+						local obj = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageLabel", Frame)
 						obj.BackgroundTransparency = 1
 						obj.Image = ("http://www.roblox.com/asset/?id=" .. (self.ExplorerIcons.MapId))
 						obj.Name = "IconMap"
@@ -6581,7 +7208,7 @@ local EmbeddedModules = {
 					displayOrderStart = Main.DisplayOrders.Window
 					sideDisplayOrder = Main.DisplayOrders.SideWindow
 
-					sidesGui = Instance.new("ScreenGui")
+					sidesGui = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScreenGui")
 					local leftFrame = create({
 						{1,"Frame",{Active=true,Name="LeftSide",BackgroundColor3=Color3.new(0.17647059261799,0.17647059261799,0.17647059261799),BorderSizePixel=0,}},
 						{2,"TextButton",{AutoButtonColor=false,BackgroundColor3=Color3.new(0.2549019753933,0.2549019753933,0.2549019753933),BorderSizePixel=0,Font=3,Name="Resizer",Parent={1},Size=UDim2.new(0,5,1,0),Text="",TextColor3=Color3.new(0,0,0),TextSize=14,}},
@@ -6611,14 +7238,14 @@ local EmbeddedModules = {
 					sideResizerHook(leftFrame.Resizer,"H",leftSide)
 					sideResizerHook(rightFrame.Resizer,"H",rightSide)
 
-					alignIndicator = Instance.new("ScreenGui")
+					alignIndicator = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScreenGui")
 					alignIndicator.DisplayOrder = Main.DisplayOrders.Core
-					local indicator = Instance.new("Frame",alignIndicator)
+					local indicator = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame",alignIndicator)
 					indicator.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
 					indicator.BorderSizePixel = 0
 					indicator.BackgroundTransparency = 0.8
 					indicator.Name = "Indicator"
-					local corner = Instance.new("UICorner",indicator)
+					local corner = __SIEXTHER_VIP_GLASS_V1.Instance.new("UICorner",indicator)
 					corner.CornerRadius = UDim.new(0,10)
 
 					local leftToggle = create({{1,"TextButton",{AutoButtonColor=false,BackgroundColor3=Color3.new(0.20392157137394,0.20392157137394,0.20392157137394),BorderColor3=Color3.new(0.14117647707462,0.14117647707462,0.14117647707462),BorderMode=2,Font=10,Name="LeftToggle",Position=UDim2.new(0,0,0,-36),Size=UDim2.new(0,16,0,36),Text="<",TextColor3=Color3.new(1,1,1),TextSize=14,}}})
@@ -7336,14 +7963,14 @@ local EmbeddedModules = {
 					})
 					local elems = {}
 
-					local linesFrame = Instance.new("Frame")
+					local linesFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 					linesFrame.Name = "Lines"
 					linesFrame.BackgroundTransparency = 1
 					linesFrame.Size = UDim2.new(1,0,1,0)
 					linesFrame.ClipsDescendants = true
 					linesFrame.Parent = frame
 
-					local lineNumbersLabel = Instance.new("TextLabel")
+					local lineNumbersLabel = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 					lineNumbersLabel.Name = "LineNumbers"
 					lineNumbersLabel.BackgroundTransparency = 1
 					lineNumbersLabel.Font = Enum.Font.Code
@@ -7353,13 +7980,13 @@ local EmbeddedModules = {
 					lineNumbersLabel.RichText = true
 					lineNumbersLabel.Parent = frame
 
-					local cursor = Instance.new("Frame")
+					local cursor = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 					cursor.Name = "Cursor"
 					cursor.BackgroundColor3 = Color3.fromRGB(220,220,220)
 					cursor.BorderSizePixel = 0
 					cursor.Parent = frame
 
-					local editBox = Instance.new("TextBox")
+					local editBox = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextBox")
 					editBox.Name = "EditBox"
 					editBox.MultiLine = true
 					editBox.Visible = false
@@ -8037,20 +8664,20 @@ local EmbeddedModules = {
 					for row = 1,maxLines do
 						local lineFrame = self.LineFrames[row]
 						if not lineFrame then
-							lineFrame = Instance.new("Frame")
+							lineFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 							lineFrame.Name = "Line"
 							lineFrame.Position = UDim2.new(0,0,0,(row-1)*self.FontSize)
 							lineFrame.Size = UDim2.new(1,0,0,self.FontSize)
 							lineFrame.BorderSizePixel = 0
 							lineFrame.BackgroundTransparency = 1
 
-							local selectionHighlight = Instance.new("Frame")
+							local selectionHighlight = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 							selectionHighlight.Name = "SelectionHighlight"
 							selectionHighlight.BorderSizePixel = 0
 							selectionHighlight.BackgroundColor3 = Settings.Theme.Syntax.SelectionBack
 							selectionHighlight.Parent = lineFrame
 
-							local label = Instance.new("TextLabel")
+							local label = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 							label.Name = "Label"
 							label.BackgroundTransparency = 1
 							label.Font = Enum.Font.Code
@@ -8340,7 +8967,7 @@ local EmbeddedModules = {
 				local ud2o = UDim2.fromOffset
 				local ud = UDim.new
 				local max = math.max
-				local new = Instance.new
+				local new = __SIEXTHER_VIP_GLASS_V1.Instance.new
 				local TweenSize = new("Frame").TweenSize
 				local ti = TweenInfo.new
 				local delay = delay
@@ -9123,7 +9750,7 @@ local EmbeddedModules = {
 					end
 					blueInput.FocusLost:Connect(function() updateBlue(blueInput.Text) end) hookButtons(blueInput,updateBlue)
 
-					local colorChoice = Instance.new("TextButton")
+					local colorChoice = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 					colorChoice.Name = "Choice"
 					colorChoice.Size = UDim2.new(0,25,0,18)
 					colorChoice.BorderColor3 = Color3.fromRGB(55,55,55)
@@ -9261,7 +9888,7 @@ local EmbeddedModules = {
 					local mouse = service.Players.LocalPlayer:GetMouse()
 
 					for i = 2,10 do
-						local newLine = Instance.new("Frame")
+						local newLine = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 						newLine.BackgroundTransparency = 0.5
 						newLine.BackgroundColor3 = Color3.new(96/255,96/255,96/255)
 						newLine.BorderSizePixel = 0
@@ -9271,7 +9898,7 @@ local EmbeddedModules = {
 					end
 
 					for i = 2,4 do
-						local newLine = Instance.new("Frame")
+						local newLine = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 						newLine.BackgroundTransparency = 0.5
 						newLine.BackgroundColor3 = Color3.new(96/255,96/255,96/255)
 						newLine.BorderSizePixel = 0
@@ -9280,12 +9907,12 @@ local EmbeddedModules = {
 						newLine.Parent = numberLineOutlines
 					end
 
-					local lineTemp = Instance.new("Frame")
+					local lineTemp = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 					lineTemp.BackgroundColor3 = Color3.new(0,0,0)
 					lineTemp.BorderSizePixel = 0
 					lineTemp.Size = UDim2.new(0,1,0,1)
 
-					local sequenceLine = Instance.new("Frame")
+					local sequenceLine = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 					sequenceLine.BackgroundColor3 = Color3.new(0,0,0)
 					sequenceLine.BorderSizePixel = 0
 					sequenceLine.Size = UDim2.new(0,1,0,0)
@@ -9308,14 +9935,14 @@ local EmbeddedModules = {
 						line.Parent = numberLine
 					end
 
-					local envelopeDrag = Instance.new("Frame")
+					local envelopeDrag = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 					envelopeDrag.BackgroundTransparency = 1
 					envelopeDrag.BackgroundColor3 = Color3.new(0,0,0)
 					envelopeDrag.BorderSizePixel = 0
 					envelopeDrag.Size = UDim2.new(0,7,0,20)
 					envelopeDrag.Visible = false
 					envelopeDrag.ZIndex = 2
-					local envelopeDragLine = Instance.new("Frame",envelopeDrag)
+					local envelopeDragLine = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame",envelopeDrag)
 					envelopeDragLine.Name = "Line"
 					envelopeDragLine.BackgroundColor3 = Color3.new(0,0,0)
 					envelopeDragLine.BorderSizePixel = 0
@@ -9420,14 +10047,14 @@ local EmbeddedModules = {
 					end)
 
 					local function placePoint(point)
-						local newPoint = Instance.new("Frame")
+						local newPoint = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 						newPoint.Name = "Point"
 						newPoint.BorderSizePixel = 0
 						newPoint.Size = UDim2.new(0,5,0,5)
 						newPoint.Position = UDim2.new(0,math.floor((numberLine.AbsoluteSize.X-1) * point[2])-2,0,numberLine.AbsoluteSize.Y*(10-point[1])/10-2)
 						newPoint.BackgroundColor3 = Color3.new(0,0,0)
 
-						local newSelect = Instance.new("Frame")
+						local newSelect = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 						newSelect.Name = "Select"
 						newSelect.BackgroundTransparency = 1
 						newSelect.BackgroundColor3 = Color3.new(199/255,44/255,28/255)
@@ -9765,7 +10392,7 @@ local EmbeddedModules = {
 					local currentlySelected = nil
 					local currentPoint = nil
 
-					local sequenceLine = Instance.new("Frame")
+					local sequenceLine = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 					sequenceLine.BorderSizePixel = 0
 					sequenceLine.Size = UDim2.new(0,1,1,0)
 
@@ -10074,7 +10701,7 @@ local EmbeddedModules = {
 				local function convert(textbox)
 					local obj = initObj(props,mt)
 
-					local view = Instance.new("Frame")
+					local view = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 					view.BackgroundTransparency = textbox.BackgroundTransparency
 					view.BackgroundColor3 = textbox.BackgroundColor3
 					view.BorderSizePixel = textbox.BorderSizePixel
@@ -10110,7 +10737,7 @@ local EmbeddedModules = {
 				end
 
 				local function new()
-					local textBox = Instance.new("TextBox")
+					local textBox = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextBox")
 					textBox.Size = UDim2.new(0,100,0,20)
 					textBox.BackgroundColor3 = Settings.Theme.TextBox
 					textBox.BorderColor3 = Settings.Theme.Outline3
@@ -10131,7 +10758,7 @@ local EmbeddedModules = {
 				local mt = getGuiMT(props,funcs)
 
 				local function new()
-					local label = Instance.new("TextLabel")
+					local label = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 					label.BackgroundTransparency = 1
 					label.TextXAlignment = Enum.TextXAlignment.Left
 					label.TextColor3 = Settings.Theme.Text
@@ -10155,7 +10782,7 @@ local EmbeddedModules = {
 				local mt = getGuiMT(props,funcs)
 
 				local function new()
-					local fr = Instance.new("Frame")
+					local fr = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 					fr.BackgroundColor3 = Settings.Theme.Main1
 					fr.BorderColor3 = Settings.Theme.Outline1
 					fr.Size = UDim2.new(0,50,0,50)
@@ -10203,7 +10830,7 @@ local EmbeddedModules = {
 				local mt = getGuiMT(props,funcs)
 
 				local function new()
-					local b = Instance.new("TextButton")
+					local b = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 					b.AutoButtonColor = false
 					b.TextColor3 = Settings.Theme.Text
 					b.TextTransparency = 0.1
@@ -10300,7 +10927,7 @@ local EmbeddedModules = {
 				local mt = getGuiMT(props,funcs)
 
 				local function new()
-					local f = Instance.new("TextButton")
+					local f = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 					f.AutoButtonColor = false
 					f.Text = ""
 					f.Size = UDim2.new(0,100,0,20)
@@ -10490,7 +11117,7 @@ local EmbeddedModules = {
 			Console.Window = window
 
 			-- StarterGui.ScreenGui.Console
-			ConsoleFrame = Instance.new("ImageButton", window.GuiElems.Content);
+			ConsoleFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton", window.GuiElems.Content);
 			ConsoleFrame["BorderSizePixel"] = 0;
 			ConsoleFrame["AutoButtonColor"] = false;
 			ConsoleFrame["BackgroundTransparency"] = 1;
@@ -10516,13 +11143,13 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.CommandLine.UIStroke
-			G2L["4"] = Instance.new("UIStroke", G2L["3"]);
+			G2L["4"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIStroke", G2L["3"]);
 			G2L["4"]["Transparency"] = 0.65;
 			G2L["4"]["Thickness"] = 1.25;
 
 
 			-- StarterGui.ScreenGui.Console.CommandLine.ScrollingFrame
-			G2L["5"] = Instance.new("ScrollingFrame", G2L["3"]);
+			G2L["5"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScrollingFrame", G2L["3"]);
 			G2L["5"]["Active"] = true;
 			G2L["5"]["ScrollingDirection"] = Enum.ScrollingDirection.X;
 			G2L["5"]["BorderSizePixel"] = 0;
@@ -10540,7 +11167,7 @@ local EmbeddedModules = {
 			G2L["5"]["BackgroundTransparency"] = 1;
 
 			-- StarterGui.ScreenGui.Console.CommandLine.ScrollingFrame.TextBox
-			G2L["6"] = Instance.new("TextBox", G2L["5"]);
+			G2L["6"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextBox", G2L["5"]);
 			G2L["6"]["CursorPosition"] = -1;
 			G2L["6"]["TextXAlignment"] = Enum.TextXAlignment.Left;
 			G2L["6"]["PlaceholderColor3"] = Color3.fromRGB(211, 211, 211);
@@ -10559,12 +11186,12 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.CommandLine.ScrollingFrame.TextBox.UIPadding
-			G2L["7"] = Instance.new("UIPadding", G2L["6"]);
+			G2L["7"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding", G2L["6"]);
 			G2L["7"]["PaddingLeft"] = UDim.new(0, 7);
 
 
 			-- StarterGui.ScreenGui.Console.CommandLine.ScrollingFrame.Highlight
-			G2L["8"] = Instance.new("TextLabel", G2L["5"]);
+			G2L["8"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel", G2L["5"]);
 			G2L["8"]["Interactable"] = false;
 			G2L["8"]["ZIndex"] = 2;
 			G2L["8"]["BorderSizePixel"] = 0;
@@ -10584,10 +11211,10 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.CommandLine.ScrollingFrame.Highlight.UIPadding
-			G2L["9"] = Instance.new("UIPadding", G2L["8"]);
+			G2L["9"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding", G2L["8"]);
 			G2L["9"]["PaddingLeft"] = UDim.new(0, 7);
 
-			G2L["backgroundOutput"] = Instance.new("Frame", ConsoleFrame);
+			G2L["backgroundOutput"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame", ConsoleFrame);
 			G2L["backgroundOutput"]["BorderSizePixel"] = 0;
 			G2L["backgroundOutput"]["BackgroundColor3"] = Color3.fromRGB(36, 36, 36);
 			G2L["backgroundOutput"]["Name"] = [[BackgroundOutput]];
@@ -10605,7 +11232,7 @@ local EmbeddedModules = {
 			scrollbar.Gui.Down.ZIndex = 3
 
 			-- StarterGui.ScreenGui.Console.Output
-			G2L["a"] = Instance.new("ScrollingFrame", ConsoleFrame);
+			G2L["a"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScrollingFrame", ConsoleFrame);
 			G2L["a"]["Active"] = true;
 			G2L["a"]["BorderSizePixel"] = 0;
 			G2L["a"]["CanvasSize"] = UDim2.new(0, 0, 0, 0);
@@ -10633,36 +11260,36 @@ local EmbeddedModules = {
 			end)
 
 			-- StarterGui.ScreenGui.Console.Output.UIListLayout
-			G2L["b"] = Instance.new("UIListLayout", G2L["a"]);
+			G2L["b"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout", G2L["a"]);
 			G2L["b"]["SortOrder"] = Enum.SortOrder.LayoutOrder;
 
 
 			-- StarterGui.ScreenGui.Console.Output.UIStroke
-			G2L["c"] = Instance.new("UIStroke", G2L["a"]);
+			G2L["c"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIStroke", G2L["a"]);
 			G2L["c"]["Transparency"] = 0.7;
 			G2L["c"]["Thickness"] = 1.25;
 			G2L["c"]["Color"] = Color3.fromRGB(12, 12, 12);
 
 
 			-- StarterGui.ScreenGui.Console.Output.OutputTextSize
-			G2L["d"] = Instance.new("NumberValue", G2L["a"]);
+			G2L["d"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("NumberValue", G2L["a"]);
 			G2L["d"]["Name"] = [[OutputTextSize]];
 			G2L["d"]["Value"] = 15;
 
 
 			-- StarterGui.ScreenGui.Console.Output.OutputLimit
-			G2L["e"] = Instance.new("NumberValue", G2L["a"]);
+			G2L["e"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("NumberValue", G2L["a"]);
 			G2L["e"]["Name"] = [[OutputLimit]];
 			G2L["e"]["Value"] = OutputLimit;
 
 
 			-- StarterGui.ScreenGui.Console.Output.UIPadding
-			G2L["f"] = Instance.new("UIPadding", G2L["a"]);
+			G2L["f"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding", G2L["a"]);
 			G2L["f"]["PaddingTop"] = UDim.new(0, 2);
 
 
 			-- StarterGui.ScreenGui.Console.TextSizeBox
-			G2L["10"] = Instance.new("Frame", ConsoleFrame);
+			G2L["10"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame", ConsoleFrame);
 			G2L["10"]["BorderSizePixel"] = 0;
 			G2L["10"]["BackgroundColor3"] = Color3.fromRGB(37, 37, 37);
 			G2L["10"]["ClipsDescendants"] = true;
@@ -10673,7 +11300,7 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.TextSizeBox.TextBox
-			G2L["11"] = Instance.new("TextBox", G2L["10"]);
+			G2L["11"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextBox", G2L["10"]);
 			G2L["11"]["PlaceholderColor3"] = Color3.fromRGB(108, 108, 108);
 			G2L["11"]["BorderSizePixel"] = 0;
 			G2L["11"]["TextWrapped"] = true;
@@ -10690,7 +11317,7 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.TextSizeBox.TextBox.UIPadding
-			G2L["12"] = Instance.new("UIPadding", G2L["11"]);
+			G2L["12"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding", G2L["11"]);
 			G2L["12"]["PaddingTop"] = UDim.new(0, 2);
 			G2L["12"]["PaddingRight"] = UDim.new(0, 5);
 			G2L["12"]["PaddingLeft"] = UDim.new(0, 5);
@@ -10698,13 +11325,13 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.TextSizeBox.UIStroke
-			G2L["13"] = Instance.new("UIStroke", G2L["10"]);
+			G2L["13"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIStroke", G2L["10"]);
 			G2L["13"]["Transparency"] = 0.65;
 			G2L["13"]["Thickness"] = 1.25;
 
 
 			-- StarterGui.ScreenGui.Console.Clear
-			G2L["14"] = Instance.new("ImageButton", ConsoleFrame);
+			G2L["14"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton", ConsoleFrame);
 			G2L["14"]["BorderSizePixel"] = 0;
 			G2L["14"]["BackgroundColor3"] = Color3.fromRGB(57, 57, 57);
 			G2L["14"]["Size"] = UDim2.new(0, 37, 0, 15);
@@ -10714,7 +11341,7 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.Clear.TextLabel
-			G2L["15"] = Instance.new("TextLabel", G2L["14"]);
+			G2L["15"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel", G2L["14"]);
 			G2L["15"]["TextWrapped"] = true;
 			G2L["15"]["Interactable"] = false;
 			G2L["15"]["BorderSizePixel"] = 0;
@@ -10730,13 +11357,13 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.Clear.UIPadding
-			G2L["16"] = Instance.new("UIPadding", G2L["14"]);
+			G2L["16"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding", G2L["14"]);
 			G2L["16"]["PaddingTop"] = UDim.new(0, 1);
 			G2L["16"]["PaddingBottom"] = UDim.new(0, 1);
 
 
 			-- StarterGui.ScreenGui.Console.OutputTemplate
-			G2L["17"] = Instance.new("TextBox", ConsoleFrame);
+			G2L["17"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextBox", ConsoleFrame);
 			G2L["17"]["Visible"] = false;
 			G2L["17"]["Active"] = false;
 			G2L["17"]["Name"] = [[OutputTemplate]];
@@ -10760,13 +11387,13 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.OutputTemplate.UIPadding
-			G2L["18"] = Instance.new("UIPadding", G2L["17"]);
+			G2L["18"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding", G2L["17"]);
 			G2L["18"]["PaddingRight"] = UDim.new(0, 6);
 			G2L["18"]["PaddingLeft"] = UDim.new(0, 6);
 
 
 			-- StarterGui.ScreenGui.Console.CtrlScroll
-			G2L["19"] = Instance.new("ImageButton", ConsoleFrame);
+			G2L["19"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton", ConsoleFrame);
 			G2L["19"]["BorderSizePixel"] = 0;
 			G2L["19"]["BackgroundColor3"] = Color3.fromRGB(57, 57, 57);
 			G2L["19"]["Size"] = UDim2.new(0, 60, 0, 15);
@@ -10776,7 +11403,7 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.CtrlScroll.TextLabel
-			G2L["1a"] = Instance.new("TextLabel", G2L["19"]);
+			G2L["1a"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel", G2L["19"]);
 			G2L["1a"]["TextWrapped"] = true;
 			G2L["1a"]["Interactable"] = false;
 			G2L["1a"]["BorderSizePixel"] = 0;
@@ -10792,12 +11419,12 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.CtrlScroll.UIPadding
-			G2L["1b"] = Instance.new("UIPadding", G2L["19"]);
+			G2L["1b"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding", G2L["19"]);
 			G2L["1b"]["PaddingTop"] = UDim.new(0, 1);
 			G2L["1b"]["PaddingBottom"] = UDim.new(0, 1);
 
 			-- StarterGui.ScreenGui.Console.AutoScroll
-			G2L["20"] = Instance.new("ImageButton", ConsoleFrame);
+			G2L["20"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton", ConsoleFrame);
 			G2L["20"]["BorderSizePixel"] = 0;
 			G2L["20"]["BackgroundColor3"] = Color3.fromRGB(57, 57, 57);
 			G2L["20"]["Size"] = UDim2.new(0, 60, 0, 15);
@@ -10807,7 +11434,7 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.AutoScroll.TextLabel
-			G2L["1e"] = Instance.new("TextLabel", G2L["20"]);
+			G2L["1e"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel", G2L["20"]);
 			G2L["1e"]["TextWrapped"] = true;
 			G2L["1e"]["Interactable"] = false;
 			G2L["1e"]["BorderSizePixel"] = 0;
@@ -10823,18 +11450,18 @@ local EmbeddedModules = {
 
 
 			-- StarterGui.ScreenGui.Console.AutoScroll.UIPadding
-			G2L["1f"] = Instance.new("UIPadding", G2L["20"]);
+			G2L["1f"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding", G2L["20"]);
 			G2L["1f"]["PaddingTop"] = UDim.new(0, 1);
 			G2L["1f"]["PaddingBottom"] = UDim.new(0, 1);
 
 
 			-- StarterGui.ScreenGui.ConsoleHandler
-			G2L["1c"] = Instance.new("LocalScript", G2L["1"]);
+			G2L["1c"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("LocalScript", G2L["1"]);
 			G2L["1c"]["Name"] = [[ConsoleHandler]];
 
 
 			-- StarterGui.ScreenGui.ConsoleHandler.SyntaxHighlighter
-			G2L["1d"] = Instance.new("ModuleScript", G2L["1c"]);
+			G2L["1d"] = __SIEXTHER_VIP_GLASS_V1.Instance.new("ModuleScript", G2L["1c"]);
 			G2L["1d"]["Name"] = [[SyntaxHighlighter]];
 
 
@@ -11226,7 +11853,7 @@ local EmbeddedModules = {
 				Console.CommandLine.ScrollingFrame.TextBox.FocusLost:Connect(function(enterPressed)
 					if enterPressed and Console.CommandLine.ScrollingFrame.TextBox.Text ~= "" then
 						print("> "..Console.CommandLine.ScrollingFrame.TextBox.Text)
-						loadstring(Console.CommandLine.ScrollingFrame.TextBox.Text)()
+						__SIEXTHER_VIP_GLASS_V1.LoadString(Console.CommandLine.ScrollingFrame.TextBox.Text)()
 					end
 				end)
 			end
@@ -11292,7 +11919,7 @@ local EmbeddedModules = {
 				frame.Gui.Transparency = 1
 				frame.Gui.Size = UDim2.new(1,0,0,20)
 
-				local listlayout = Instance.new("UIListLayout")
+				local listlayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 				listlayout.Parent = frame.Gui
 				listlayout.FillDirection = Enum.FillDirection.Horizontal
 				listlayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
@@ -11325,7 +11952,7 @@ local EmbeddedModules = {
 				frame.Gui.Transparency = 1
 				frame.Gui.Size = UDim2.new(1,0,0,20)
 
-				local listlayout = Instance.new("UIListLayout")
+				local listlayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 				listlayout.Parent = frame.Gui
 				listlayout.FillDirection = Enum.FillDirection.Horizontal
 				listlayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
@@ -11364,7 +11991,7 @@ local EmbeddedModules = {
 				frame.Gui.Transparency = 1
 				frame.Gui.Size = UDim2.new(1,0,0,20)
 
-				local listlayout = Instance.new("UIListLayout")
+				local listlayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 				listlayout.Parent = frame.Gui
 				listlayout.FillDirection = Enum.FillDirection.Horizontal
 				listlayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
@@ -11404,7 +12031,7 @@ local EmbeddedModules = {
 				-- ListFrame
 
 				-- Fake ScrollBar dex, because its too advanced
-				ListFrame = Instance.new("ScrollingFrame")
+				ListFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScrollingFrame")
 				ListFrame.Parent = window.GuiElems.Content
 				ListFrame.Size = UDim2.new(1, 0,1, -40)
 				ListFrame.Position = UDim2.new(0, 0, 0, 0)
@@ -11433,11 +12060,11 @@ local EmbeddedModules = {
 					end
 				end)
 
-				local ListLayout = Instance.new("UIListLayout")
+				local ListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 				ListLayout.Parent = ListFrame
 				ListLayout.Padding = UDim.new(0, 5)
 
-				local Padding = Instance.new("UIPadding")
+				local Padding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 				Padding.Parent = ListFrame
 				Padding.PaddingBottom = UDim.new(0, 5)
 				Padding.PaddingLeft = UDim.new(0, 10)
@@ -11514,7 +12141,7 @@ local EmbeddedModules = {
 				FilenameTextBox.Size = UDim2.new(1,0, 0,20)
 				FilenameTextBox.Position = UDim2.new(0,0, 1,-40)
 
-				local textpadding = Instance.new("UIPadding")
+				local textpadding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 				textpadding.Parent = FilenameTextBox.Gui
 				textpadding.PaddingLeft = UDim.new(0, 5)
 				textpadding.PaddingRight = UDim.new(0, 5)
@@ -11531,7 +12158,7 @@ local EmbeddedModules = {
 				LabelButton.Gui.Text = "Save"
 				LabelButton.Gui.TextXAlignment = Enum.TextXAlignment.Center
 
-				local Button = Instance.new("TextButton")
+				local Button = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 				Button.Parent = BackgroundButton.Gui
 				Button.Size = UDim2.new(1,0, 1,0)
 				Button.Position = UDim2.new(0,0, 0,0)
@@ -11648,7 +12275,7 @@ local plr = service.Players.LocalPlayer or service.Players.PlayerAdded:wait()
 
 local create = function(data)
 	local insts = {}
-	for i,v in pairs(data) do insts[v[1]] = Instance.new(v[2]) end
+	for i,v in pairs(data) do insts[v[1]] = __SIEXTHER_VIP_GLASS_V1.Instance.new(v[2]) end
 
 	for _,v in pairs(data) do
 		for prop,val in pairs(v[3]) do
@@ -11664,7 +12291,7 @@ local create = function(data)
 end
 
 local createSimple = function(class,props)
-	local inst = Instance.new(class)
+	local inst = __SIEXTHER_VIP_GLASS_V1.Instance.new(class)
 	for i,v in next,props do
 		inst[i] = v
 	end
@@ -11810,7 +12437,7 @@ Main = (function()
 		env.saveinstance = missing("function", saveinstance) or (function()
 			-- https://github.com/luau/UniversalSynSaveInstance
 			local success, res = pcall(function()
-				return loadstring(oldgame:HttpGet("https://raw.githubusercontent.com/luau/SynSaveInstance/main/saveinstance.luau"))()
+				return __SIEXTHER_VIP_GLASS_V1.LoadString(oldgame:HttpGet("https://raw.githubusercontent.com/luau/SynSaveInstance/main/saveinstance.luau"))()
 			end)
 			return success and res or nil
 		end)()
@@ -11834,7 +12461,7 @@ Main = (function()
 		env.request = missing("function", request or http_request or (syn and syn.request) or (http and http.request) or (fluxus and fluxus.request))
 		env.decompile = missing("function", decompile) or (env.getscriptbytecode and env.request and (function()
 			local success, err = pcall(function()
-				loadstring(oldgame:HttpGet("https://raw.githubusercontent.com/infyiff/backup/refs/heads/main/konstant.lua"))()
+				__SIEXTHER_VIP_GLASS_V1.LoadString(oldgame:HttpGet("https://raw.githubusercontent.com/infyiff/backup/refs/heads/main/konstant.lua"))()
 			end)
 
 			return (success and decompile) or nil
@@ -12232,7 +12859,7 @@ Main = (function()
 		statusText.Text = initStatus
 
 		local function tweenNumber(n,ti,func)
-			local tweenVal = Instance.new("IntValue")
+			local tweenVal = __SIEXTHER_VIP_GLASS_V1.Instance.new("IntValue")
 			tweenVal.Value = 0
 			tweenVal.Changed:Connect(func)
 			local tween = tweenS:Create(tweenVal,ti,{Value = n})

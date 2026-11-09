@@ -1,3 +1,630 @@
+-- SIEXTHER: liquid glass from VIPUNIV.lua; original feature code follows below.
+do
+    local environment = (type(getgenv) == "function" and getgenv()) or _G
+    if not environment.__SIEXTHER_VIP_GLASS_V1 then
+        environment.__SIEXTHER_VIP_GLASS_V1 = (function()
+            -- SIEXTHER / VIP UNIV liquid glass.
+            -- The palette, surface(), edge/fill gradients and blur strength come from VIPUNIV.lua.
+            -- This module owns only ScreenGuis constructed through its private Instance facade.
+            -- It does not hook Roblox globals or restyle the game's own interface.
+            local nativeInstance = Instance
+            local nativeLoadString = loadstring
+            local nativeGetEnvironment = getfenv
+            local nativeSetEnvironment = setfenv
+            local scheduler = task
+            local TweenService = game:GetService("TweenService")
+            local Lighting = game:GetService("Lighting")
+            
+            local Glass = {
+                Version = "VIPUNIV-1.0",
+                primaryColor = Color3.fromRGB(70, 130, 255),
+                accentColor = Color3.fromRGB(100, 200, 255),
+                bgColor = Color3.fromRGB(43, 62, 91),
+                buttonColor = Color3.fromRGB(219, 232, 255),
+                textColor = Color3.fromRGB(255, 255, 255),
+                panelTransparency = 0.48,
+                cardTransparency = 0.88,
+                blurSize = 18,
+            }
+            local prefix = "__VIPGlass_"
+            local roots = {}
+            local objects = setmetatable({}, {__mode = "k"})
+            local environmentCache = setmetatable({}, {__mode = "k"})
+            local blur, blurTween, blurTarget
+            local refreshQueued = false
+            local styleObject, queueObject, refreshBlur
+            
+            local function own(object)
+                return object.Name:sub(1, #prefix) == prefix
+            end
+            local function put(record, property, value)
+                record.output[property] = value
+                if record.object[property] ~= value then record.object[property] = value end
+            end
+            local function namedChild(object, class, name)
+                local child = object:FindFirstChild(name)
+                if not child then
+                    child = nativeInstance.new(class)
+                    child.Name = name
+                    child.Parent = object
+                end
+                return child
+            end
+            local function gradient(object, name, rotation, colors, alpha)
+                local existing = object:FindFirstChild(prefix .. name)
+                if existing then return existing end
+                local fill = namedChild(object, "UIGradient", prefix .. name)
+                fill.Rotation = rotation
+                fill.Color = ColorSequence.new(colors)
+                if alpha then fill.Transparency = NumberSequence.new(alpha) end
+                return fill
+            end
+            local function visible(object, root)
+                if not root.Parent or not root.Enabled then return false end
+                local parent = object
+                while parent and parent ~= root do
+                    if parent:IsA("GuiObject") and not parent.Visible then return false end
+                    parent = parent.Parent
+                end
+                return parent == root
+            end
+            local function dimensions(object)
+                local size, absolute = object.Size, object.AbsoluteSize
+                local width = absolute.X > 0 and absolute.X or size.X.Offset
+                local height = absolute.Y > 0 and absolute.Y or size.Y.Offset
+                return width, height
+            end
+            local function hasLayout(object)
+                return object:FindFirstChildOfClass("UIListLayout")
+                    or object:FindFirstChildOfClass("UIGridLayout")
+                    or object:FindFirstChildOfClass("UIPageLayout")
+                    or object:FindFirstChildOfClass("UITableLayout")
+            end
+            local function skip(object, root)
+                -- Reticles, radar artwork, sampled colors and viewport renders are content, not panels.
+                if root:GetAttribute("VIPGlassIgnore") then return true end
+                local rootName = root.Name:lower()
+                if rootName == "hannsiexther_crosshair" or rootName == "explorerselections"
+                    or rootName == "alignindicator" then return true end
+                local current = object
+                while current and current ~= root do
+                    if current:GetAttribute("VIPGlassIgnore") or current:IsA("ViewportFrame")
+                        or current:IsA("BillboardGui") or current:IsA("SurfaceGui")
+                        or own(current) then return true end
+                    local name = current.Name:lower()
+                    if name == "crosshairpreview" or name == "crosshaircanvas"
+                        or name == "radarcanvas" or name == "radarmap"
+                        or name == "hue" or name == "saturation" or name == "colorwheel"
+                        or name == "colorchoice" or name:find("swatch", 1, true)
+                        or name == "syntaxhighlight" then return true end
+                    current = current.Parent
+                end
+                return false
+            end
+            local function saturated(color)
+                local _, saturation, value = color:ToHSV()
+                return saturation > 0.32 and value > 0.22
+            end
+            local function statusColor(color)
+                local h, s, v = color:ToHSV()
+                return s > 0.4 and v > 0.55 and (h < 0.17 or (h > 0.2 and h < 0.48) or h > 0.95)
+            end
+            local function hasOpaqueAncestor(object, root)
+                local parent = object.Parent
+                while parent and parent ~= root do
+                    if parent:IsA("GuiObject") then
+                        local record = objects[parent]
+                        local alpha = record and record.source.BackgroundTransparency or parent.BackgroundTransparency
+                        if alpha < 1 then return true end
+                    end
+                    parent = parent.Parent
+                end
+                return false
+            end
+            
+            -- Adapted directly from settings.Glass.surface in VIPUNIV.lua.
+            function Glass.surface(object, transparency, radius, edge)
+                object.BackgroundTransparency = transparency
+                object.BorderSizePixel = 0
+                local corner = object:FindFirstChildOfClass("UICorner")
+                if not corner then corner = namedChild(object, "UICorner", prefix .. "Corner") end
+                corner.CornerRadius = UDim.new(0, radius)
+                local stroke = namedChild(object, "UIStroke", prefix .. "Edge")
+                stroke.Enabled = true
+                stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                stroke.Color = Glass.primaryColor
+                stroke.Thickness = radius >= 20 and 1.6 or 1
+                stroke.Transparency = edge or 0.78
+                gradient(stroke, "GlassEdge", 125, {
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(133, 184, 255)),
+                    ColorSequenceKeypoint.new(0.35, Glass.primaryColor),
+                    ColorSequenceKeypoint.new(0.75, Color3.fromRGB(55, 108, 211)),
+                    ColorSequenceKeypoint.new(1, Color3.fromRGB(139, 194, 255)),
+                }, {
+                    NumberSequenceKeypoint.new(0, 0),
+                    NumberSequenceKeypoint.new(0.38, 0.36),
+                    NumberSequenceKeypoint.new(0.72, 0.78),
+                    NumberSequenceKeypoint.new(1, 0.12),
+                })
+            end
+            local function fill(record, panel)
+                local object = record.object
+                for _, child in ipairs(object:GetChildren()) do
+                    if child:IsA("UIGradient") and not own(child) then child.Enabled = false end
+                end
+                local tint
+                if panel then
+                    tint = gradient(object, "GlassTint", 100, {
+                        ColorSequenceKeypoint.new(0, Color3.fromRGB(230, 244, 255)),
+                        ColorSequenceKeypoint.new(0.42, Color3.fromRGB(148, 185, 233)),
+                        ColorSequenceKeypoint.new(1, Color3.fromRGB(209, 231, 255)),
+                    })
+                else
+                    tint = gradient(object, "GlassFill", 105, {
+                        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+                        ColorSequenceKeypoint.new(0.48, Color3.fromRGB(183, 207, 243)),
+                        ColorSequenceKeypoint.new(1, Color3.fromRGB(235, 244, 255)),
+                    })
+                end
+                tint.Enabled = true
+                return tint
+            end
+            local function clearSurface(record)
+                local object = record.object
+                for _, name in ipairs({"Edge", "GlassTint", "GlassFill"}) do
+                    local child = object:FindFirstChild(prefix .. name)
+                    if child then child.Enabled = false end
+                end
+            end
+            local function stopSheen(record)
+                if record.sweep then record.sweep:Cancel(); record.sweep = nil end
+                if record.sheen then record.sheen:Destroy(); record.sheen = nil end
+                if record.rim then record.rim:Destroy(); record.rim = nil end
+            end
+            local function panelDetail(record)
+                local object = record.object
+                -- Extra GuiObjects must never become entries in an existing automatic layout.
+                if hasLayout(object) then stopSheen(record); return end
+                if not record.rim then
+                    local rim = namedChild(object, "Frame", prefix .. "LiquidInnerRim")
+                    rim.Active = false
+                    rim.Selectable = false
+                    rim.Size = UDim2.new(1, -6, 1, -6)
+                    rim.Position = UDim2.new(0, 3, 0, 3)
+                    rim.BackgroundTransparency = 1
+                    rim.BorderSizePixel = 0
+                    rim.ZIndex = object.ZIndex
+                    namedChild(rim, "UICorner", prefix .. "Corner").CornerRadius = UDim.new(0, 19)
+                    local stroke = namedChild(rim, "UIStroke", prefix .. "RimEdge")
+                    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                    stroke.Color = Color3.fromRGB(146, 193, 255)
+                    stroke.Transparency = 0.77
+                    stroke.Thickness = 1
+                    gradient(stroke, "RimShine", 105, {
+                        ColorSequenceKeypoint.new(0, Glass.textColor),
+                        ColorSequenceKeypoint.new(1, Glass.textColor),
+                    }, {
+                        NumberSequenceKeypoint.new(0, 0.08),
+                        NumberSequenceKeypoint.new(0.48, 0.85),
+                        NumberSequenceKeypoint.new(1, 0.26),
+                    })
+                    record.rim = rim
+                end
+                -- VIP UNIV's clipped light sweep; do not enable clipping on an existing popup host.
+                if object.ClipsDescendants and not record.sheen then
+                    local sheen = namedChild(object, "Frame", prefix .. "LiquidSheen")
+                    sheen.Active = false
+                    sheen.Selectable = false
+                    sheen.Position = UDim2.new(0, -90, 0, 0)
+                    sheen.Size = UDim2.new(0, 92, 1, 0)
+                    sheen.Rotation = -12
+                    sheen.BackgroundColor3 = Color3.fromRGB(178, 219, 255)
+                    sheen.BackgroundTransparency = 0.95
+                    sheen.BorderSizePixel = 0
+                    sheen.ZIndex = object.ZIndex
+                    gradient(sheen, "SheenFade", 0, {
+                        ColorSequenceKeypoint.new(0, Glass.textColor),
+                        ColorSequenceKeypoint.new(1, Glass.textColor),
+                    }, {
+                        NumberSequenceKeypoint.new(0, 1),
+                        NumberSequenceKeypoint.new(0.45, 0.18),
+                        NumberSequenceKeypoint.new(0.55, 0.18),
+                        NumberSequenceKeypoint.new(1, 1),
+                    })
+                    record.sheen = sheen
+                    record.sweep = TweenService:Create(sheen,
+                        TweenInfo.new(1.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, false, 7),
+                        {Position = UDim2.new(1, 60, 0, 0)})
+                end
+                if record.sweep then
+                    if visible(object, record.root) then record.sweep:Play() else record.sweep:Pause() end
+                end
+            end
+            local function shadow(record)
+                local object = record.object
+                if object.Parent ~= record.root or hasLayout(record.root) then return end
+                -- Global ZIndex layouts may place their text at level 1. Never raise their panel over it.
+                if object.ZIndex <= 1 and record.root.ZIndexBehavior == Enum.ZIndexBehavior.Global then return end
+                if not record.shadow then
+                    local holder = namedChild(record.root, "Frame", prefix .. "Shadow_" .. tostring(record.id))
+                    holder.Active = false
+                    holder.Selectable = false
+                    holder.BackgroundTransparency = 1
+                    holder.BorderSizePixel = 0
+                    holder.ZIndex = math.max(1, object.ZIndex - 1)
+                    if object.ZIndex == 1 then put(record, "ZIndex", 2) end
+                    for i = 1, 5 do
+                        local layer = nativeInstance.new("Frame")
+                        layer.Name = prefix .. "ShadowLayer"
+                        layer.Active = false
+                        layer.AnchorPoint = Vector2.new(0.5, 0.5)
+                        layer.Position = UDim2.new(0.5, 0, 0.5, 5)
+                        layer.Size = UDim2.new(1, i * 5, 1, i * 5)
+                        layer.BackgroundColor3 = Color3.fromRGB(4, 8, 18)
+                        layer.BackgroundTransparency = 0.96
+                        layer.BorderSizePixel = 0
+                        layer.ZIndex = holder.ZIndex
+                        namedChild(layer, "UICorner", prefix .. "Corner").CornerRadius = UDim.new(0, 22 + i * 2)
+                        layer.Parent = holder
+                    end
+                    record.shadow = holder
+                end
+                local holder = record.shadow
+                holder.Position = object.Position
+                holder.Size = object.Size
+                holder.AnchorPoint = object.AnchorPoint
+                holder.Visible = visible(object, record.root)
+                holder.ZIndex = math.max(1, object.ZIndex - 1)
+                local scale = object:FindFirstChildOfClass("UIScale")
+                local copy = holder:FindFirstChildOfClass("UIScale")
+                if scale then
+                    copy = copy or namedChild(holder, "UIScale", prefix .. "Scale")
+                    copy.Scale = scale.Scale
+                elseif copy then copy.Scale = 1 end
+            end
+            local function setPanel(record, isPanel)
+                record.panel = isPanel
+                local state = roots[record.root]
+                if state then state.panels[record.object] = isPanel and record or nil end
+                if isPanel then panelDetail(record); shadow(record)
+                else
+                    stopSheen(record)
+                    if record.shadow then record.shadow:Destroy(); record.shadow = nil end
+                end
+            end
+            local function watch(record, signal, callback)
+                record.connections[#record.connections + 1] = signal:Connect(callback)
+            end
+            local function dispose(record)
+                if record.dead then return end
+                record.dead = true
+                for _, connection in ipairs(record.connections) do connection:Disconnect() end
+                record.connections = {}
+                stopSheen(record)
+                if record.shadow then record.shadow:Destroy(); record.shadow = nil end
+                objects[record.object] = nil
+                local root = roots[record.root]
+                if root then root.objects[record.object] = nil; root.panels[record.object] = nil end
+            end
+            
+            styleObject = function(record)
+                local object, root = record.object, record.root
+                if record.dead or not object.Parent or not object:IsDescendantOf(root) or skip(object, root) then
+                    if record.panel then setPanel(record, false) end
+                    return
+                end
+                local source = record.source
+                local width, height = dimensions(object)
+                local name = object.Name:lower()
+                local text = object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox")
+                local image = object:IsA("ImageLabel") or object:IsA("ImageButton")
+                local button = object:IsA("GuiButton")
+                local imageSurface = image and height >= 64 and object.Image ~= ""
+                    and not name:find("shadow", 1, true) and not name:find("glow", 1, true)
+                    and (object.ScaleType == Enum.ScaleType.Slice or name == "main" or name == "window"
+                        or name == "background" or name == "mainframe")
+                record.writing = true
+                put(record, "BorderSizePixel", 0)
+                if text then
+                    -- Code editors and ASCII diagrams need their original character widths.
+                    if source.Font ~= Enum.Font.Code and source.Font ~= Enum.Font.RobotoMono then
+                        put(record, "Font", Enum.Font.GothamBold)
+                    end
+                    put(record, "TextColor3", statusColor(source.TextColor3) and source.TextColor3 or Glass.textColor)
+                    put(record, "TextStrokeTransparency", 1)
+                    if object:IsA("TextBox") then put(record, "PlaceholderColor3", Color3.fromRGB(180, 191, 210)) end
+                    for _, child in ipairs(object:GetChildren()) do
+                        if child:IsA("UIGradient") and not own(child) then
+                            child.Color = ColorSequence.new({
+                                ColorSequenceKeypoint.new(0, Glass.textColor),
+                                ColorSequenceKeypoint.new(0.3, Glass.primaryColor),
+                                ColorSequenceKeypoint.new(0.6, Glass.primaryColor),
+                                ColorSequenceKeypoint.new(1, Glass.textColor),
+                            })
+                        end
+                    end
+                end
+                if object:IsA("ScrollingFrame") then
+                    put(record, "ScrollBarImageColor3", Glass.primaryColor)
+                    put(record, "ScrollBarThickness", math.min(source.ScrollBarThickness, 4))
+                end
+                if button then put(record, "AutoButtonColor", false) end
+                -- Sprite sheets, profile pictures and artwork keep their image colors and gradients.
+                if image and object.Image ~= "" and not imageSurface then
+                    setPanel(record, false)
+                    if source.BackgroundTransparency < 1 then
+                        put(record, "BackgroundColor3", Glass.buttonColor)
+                        put(record, "BackgroundTransparency", Glass.cardTransparency)
+                        record.output.BackgroundTransparency = Glass.cardTransparency
+                        Glass.surface(object, Glass.cardTransparency, 11, 0.62)
+                    end
+                    record.writing = false
+                    return
+                end
+                local transparent = not imageSurface and source.BackgroundTransparency >= 1
+                local compact = object.Size.Y.Scale == 0 and height > 0 and height <= 10
+                local knob = name:find("knob", 1, true) or name:find("dragger", 1, true)
+                    or name:find("thumb", 1, true) or name == "toggleindicator"
+                local track = (name:find("switch", 1, true) or name:find("toggle", 1, true))
+                    and width <= 70 and height <= 30
+                if not track and button and text and object.Text == "" and width > 22 and width <= 65
+                    and height > 12 and height <= 28 and #object:GetChildren() > 0 then track = true end
+                local panel = not transparent and (object:IsA("Frame") or imageSurface) and not object:IsA("ScrollingFrame")
+                    and not compact and not knob and not track
+                    and (((not hasOpaqueAncestor(object, root)) and (height >= 64 or object.Size.Y.Scale > 0))
+                        or ((name:find("popup", 1, true) or name:find("modal", 1, true)
+                            or name == "mainframe" or name == "window") and height >= 64))
+                if imageSurface then put(record, "ImageTransparency", 1) end
+                setPanel(record, panel)
+                if transparent then
+                    clearSurface(record)
+                    put(record, "BackgroundTransparency", 1)
+                elseif compact or knob or track then
+                    clearSurface(record)
+                    local active = saturated(source.BackgroundColor3)
+                    local color = knob and Glass.textColor or (active and Glass.primaryColor or Color3.fromRGB(176, 189, 211))
+                    local alpha = knob and 0 or (track and (active and 0.08 or 0.7) or (active and 0 or 0.8))
+                    put(record, "BackgroundColor3", color)
+                    put(record, "BackgroundTransparency", alpha)
+                    local corner = object:FindFirstChildOfClass("UICorner")
+                    if corner then corner.CornerRadius = UDim.new(1, 0) end
+                else
+                    local active = not panel and button and saturated(source.BackgroundColor3)
+                    local section = not panel and (name:find("sidebar", 1, true) or name:find("header", 1, true)
+                        or name == "topbar" or name == "titlebar" or name == "sxthr")
+                    local search = object:IsA("TextBox") or name:find("search", 1, true)
+                    local alpha = panel and Glass.panelTransparency or (active and 0.28 or (section and 0.94 or (search and 0.9 or Glass.cardTransparency)))
+                    local color = panel and Glass.bgColor or (active and Glass.primaryColor or Glass.buttonColor)
+                    put(record, "BackgroundColor3", color)
+                    put(record, "BackgroundTransparency", record.hovering and not panel and math.min(alpha, 0.84) or alpha)
+                    local actualAlpha = record.output.BackgroundTransparency
+                    Glass.surface(object, actualAlpha, panel and 22 or (search and 12 or 11), panel and 0.18 or 0.62)
+                    record.output.BackgroundTransparency = actualAlpha
+                    fill(record, panel)
+                end
+                for _, child in ipairs(object:GetChildren()) do
+                    if child:IsA("UIStroke") and not own(child) then child.Enabled = false end
+                end
+                record.writing = false
+            end
+            
+            queueObject = function(root, object)
+                local state = roots[root]
+                if not state or state.dead or own(object) then return end
+                if not object:IsA("GuiObject") then
+                    if object.Parent and object.Parent:IsA("GuiObject") then queueObject(root, object.Parent) end
+                    return
+                end
+                if skip(object, root) then return end
+                local record = objects[object]
+                if record and record.root ~= root then dispose(record); record = nil end
+                if not record then
+                    state.serial = state.serial + 1
+                    record = {object = object, root = root, source = {}, output = {}, connections = {}, id = state.serial}
+                    objects[object] = record
+                    state.objects[object] = record
+                    local properties = {"BackgroundColor3", "BackgroundTransparency", "BorderSizePixel"}
+                    if object:IsA("TextLabel") or object:IsA("TextBox") or object:IsA("TextButton") then
+                        for _, property in ipairs({"TextColor3", "Font", "TextStrokeTransparency"}) do
+                            properties[#properties + 1] = property
+                        end
+                    end
+                    if object:IsA("ScrollingFrame") then
+                        properties[#properties + 1] = "ScrollBarImageColor3"
+                        properties[#properties + 1] = "ScrollBarThickness"
+                    end
+                    for _, property in ipairs(properties) do
+                        record.source[property] = object[property]
+                        watch(record, object:GetPropertyChangedSignal(property), function()
+                            if record.dead or record.writing or object[property] == record.output[property] then return end
+                            record.source[property] = object[property]
+                            queueObject(root, object)
+                        end)
+                    end
+                    for _, property in ipairs({"Visible", "Size", "AbsoluteSize", "ClipsDescendants", "Name"}) do
+                        watch(record, object:GetPropertyChangedSignal(property), function()
+                            if not record.dead then queueObject(root, object); refreshBlur() end
+                        end)
+                    end
+                    for _, property in ipairs({"Position", "AnchorPoint"}) do
+                        watch(record, object:GetPropertyChangedSignal(property), function()
+                            if not record.dead and record.panel then shadow(record) end
+                        end)
+                    end
+                    watch(record, object.Destroying, function() dispose(record); refreshBlur() end)
+                    if object:IsA("GuiButton") then
+                        watch(record, object.MouseEnter, function() record.hovering = true; queueObject(root, object) end)
+                        watch(record, object.MouseLeave, function() record.hovering = false; queueObject(root, object) end)
+                    end
+                end
+                state.pending[object] = record
+                if state.queued then return end
+                state.queued = true
+                scheduler.defer(function()
+                    if state.dead then return end
+                    state.queued = false
+                    local pending = state.pending
+                    state.pending = {}
+                    local count = 0
+                    for _, item in pairs(pending) do
+                        if not item.dead then styleObject(item) end
+                        count = count + 1
+                        if count % 80 == 0 then scheduler.wait() end
+                    end
+                    refreshBlur()
+                end)
+            end
+            
+            refreshBlur = function()
+                if refreshQueued then return end
+                refreshQueued = true
+                scheduler.defer(function()
+                    refreshQueued = false
+                    local active, any = false, false
+                    for root, state in pairs(roots) do
+                        if not state.dead then
+                            any = true
+                            for _, record in pairs(state.panels) do
+                                if record.panel and not record.dead then
+                                    local _, height = dimensions(record.object)
+                                    local shown = visible(record.object, root)
+                                    if record.shadow then record.shadow.Visible = shown end
+                                    if record.sweep then
+                                        if shown then record.sweep:Play() else record.sweep:Pause() end
+                                    end
+                                    if shown and height >= 64 then active = true end
+                                end
+                            end
+                        end
+                    end
+                    if not any then
+                        if blurTween then blurTween:Cancel(); blurTween = nil end
+                        if blur then blur:Destroy(); blur = nil end
+                        blurTarget = nil
+                        return
+                    end
+                    if not active and not blur then return end
+                    if not blur or not blur.Parent then
+                        blur = nativeInstance.new("BlurEffect")
+                        blur.Name = prefix .. "Blur"
+                        blur.Size = 0
+                        blur.Parent = Lighting
+                        blurTarget = nil
+                    end
+                    local target = active and Glass.blurSize or 0
+                    if target == blurTarget then return end
+                    blurTarget = target
+                    if blurTween then blurTween:Cancel() end
+                    blurTween = TweenService:Create(blur, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {Size = target})
+                    blurTween:Play()
+                end)
+            end
+            
+            function Glass.attach(root)
+                if not root:IsA("ScreenGui") or roots[root] then return root end
+                local state = {objects = {}, panels = {}, pending = {}, connections = {}, serial = 0}
+                roots[root] = state
+                local function connect(signal, callback)
+                    state.connections[#state.connections + 1] = signal:Connect(callback)
+                end
+                local function scan()
+                    if state.dead then return end
+                    for _, object in ipairs(root:GetDescendants()) do
+                        if not own(object) then queueObject(root, object) end
+                    end
+                    refreshBlur()
+                end
+                connect(root.DescendantAdded, function(object)
+                    queueObject(root, object)
+                    if object:IsA("UIScale") then
+                        connect(object:GetPropertyChangedSignal("Scale"), function()
+                            if object.Parent then queueObject(root, object.Parent) end
+                        end)
+                    end
+                end)
+                connect(root.DescendantRemoving, function(object)
+                    local record = objects[object]
+                    if record and record.root == root then
+                        scheduler.defer(function()
+                            if not record.dead and not object:IsDescendantOf(root) then dispose(record); refreshBlur() end
+                        end)
+                    end
+                end)
+                connect(root:GetPropertyChangedSignal("Enabled"), refreshBlur)
+                connect(root:GetPropertyChangedSignal("Name"), scan)
+                connect(root.AncestryChanged, refreshBlur)
+                connect(root.Destroying, function()
+                    state.dead = true
+                    for _, connection in ipairs(state.connections) do connection:Disconnect() end
+                    local toRemove = {}
+                    for _, record in pairs(state.objects) do toRemove[#toRemove + 1] = record end
+                    for _, record in ipairs(toRemove) do dispose(record) end
+                    roots[root] = nil
+                    refreshBlur()
+                end)
+                scheduler.defer(scan)
+                return root
+            end
+            
+            Glass.Instance = setmetatable({}, {__index = nativeInstance})
+            function Glass.Instance.new(class, parent)
+                local object = nativeInstance.new(class)
+                if class == "ScreenGui" then Glass.attach(object) end
+                if parent then object.Parent = parent end
+                return object
+            end
+            
+            local function environmentFor(base)
+                base = base or _G
+                local cached = environmentCache[base]
+                if cached then return cached end
+                local wrapped = setmetatable({}, {
+                    __index = function(_, key)
+                        if key == "Instance" then return Glass.Instance end
+                        if key == "loadstring" then return Glass.LoadString end
+                        if key == "getfenv" then return Glass.GetEnvironment end
+                        return base[key]
+                    end,
+                    __newindex = function(_, key, value) base[key] = value end,
+                })
+                environmentCache[base] = wrapped
+                environmentCache[wrapped] = wrapped
+                return wrapped
+            end
+            function Glass.GetEnvironment(level)
+                local base
+                if nativeGetEnvironment then
+                    if level == nil then base = nativeGetEnvironment(2)
+                    elseif type(level) == "number" then base = nativeGetEnvironment(level == 0 and 0 or level + 1)
+                    else base = nativeGetEnvironment(level) end
+                end
+                return environmentFor(base)
+            end
+            function Glass.LoadString(source, chunkName)
+                local compiled, message = nativeLoadString(source, chunkName)
+                if compiled and nativeSetEnvironment then
+                    local base = nativeGetEnvironment and nativeGetEnvironment(compiled) or _G
+                    nativeSetEnvironment(compiled, environmentFor(base))
+                end
+                return compiled, message
+            end
+            
+            -- A few original menus use their old paint colors as selection state.
+            -- Those comparisons must keep reading the source value after a glass repaint.
+            function Glass.Read(object, property)
+                local record = objects[object]
+                if record and record.source[property] ~= nil and object[property] == record.output[property] then
+                    return record.source[property]
+                end
+                return object[property]
+            end
+            
+            return Glass
+        end)()
+    end
+    __SIEXTHER_VIP_GLASS_V1 = environment.__SIEXTHER_VIP_GLASS_V1
+end
+-- BEGIN ORIGINAL FEATURE CODE (GUI construction uses the VIP UNIV theme).
 
 
 local ScriptVersion = 5.55
@@ -51,16 +678,16 @@ local LoadLocalSGAEnabled = true
 local LoadLocalCustomAnimsEnabled = true
 
 local HotkeysEnabled = true
-local DoubleHotkey = Instance.new("StringValue")
-local EmoteWheelHotkey = Instance.new("StringValue")
-local SearchHotkey = Instance.new("StringValue")
-local CloseHotkey = Instance.new("StringValue")
-local SitHotkey = Instance.new("StringValue")
-local SwitchAnimHotkey = Instance.new("StringValue")
-local AnimFadeHotkey = Instance.new("StringValue")
-local SettingsHotkey = Instance.new("StringValue")
-local StopAnimsHotkey = Instance.new("StringValue")
-local ResetCharHotkey = Instance.new("StringValue")
+local DoubleHotkey = __SIEXTHER_VIP_GLASS_V1.Instance.new("StringValue")
+local EmoteWheelHotkey = __SIEXTHER_VIP_GLASS_V1.Instance.new("StringValue")
+local SearchHotkey = __SIEXTHER_VIP_GLASS_V1.Instance.new("StringValue")
+local CloseHotkey = __SIEXTHER_VIP_GLASS_V1.Instance.new("StringValue")
+local SitHotkey = __SIEXTHER_VIP_GLASS_V1.Instance.new("StringValue")
+local SwitchAnimHotkey = __SIEXTHER_VIP_GLASS_V1.Instance.new("StringValue")
+local AnimFadeHotkey = __SIEXTHER_VIP_GLASS_V1.Instance.new("StringValue")
+local SettingsHotkey = __SIEXTHER_VIP_GLASS_V1.Instance.new("StringValue")
+local StopAnimsHotkey = __SIEXTHER_VIP_GLASS_V1.Instance.new("StringValue")
+local ResetCharHotkey = __SIEXTHER_VIP_GLASS_V1.Instance.new("StringValue")
 
 CloseHotkey.Value = "T"
 SettingsHotkey.Value = "Y"
@@ -265,12 +892,12 @@ local function SaveData(Type)
 	end
 end
 
-local BgColor = Color3.fromRGB(137, 165, 255)
-local ScrollBgColor = Color3.fromRGB(240, 255, 255)
-local UiButColor = Color3.new(0, 0, 0) -- Color of GUI's buttons and Texts
-local TextBgColor = Color3.fromRGB(255, 255, 255)
-local ButtonCol = Color3.fromRGB(192, 191, 211) -- R6 Button Color
-local ButtonSelectCol = Color3.fromRGB(255, 255, 255) -- R6 Button lighter color (idk how to make it just darker BgColor yet)
+local BgColor = __SIEXTHER_VIP_GLASS_V1.bgColor
+local ScrollBgColor = __SIEXTHER_VIP_GLASS_V1.buttonColor
+local UiButColor = __SIEXTHER_VIP_GLASS_V1.textColor -- Color of GUI's buttons and Texts
+local TextBgColor = __SIEXTHER_VIP_GLASS_V1.buttonColor
+local ButtonCol = __SIEXTHER_VIP_GLASS_V1.buttonColor -- R6 Button Color
+local ButtonSelectCol = __SIEXTHER_VIP_GLASS_V1.primaryColor -- R6 Button lighter color (idk how to make it just darker BgColor yet)
 
 --Restart Values
 local FirstLaunch = true
@@ -394,8 +1021,8 @@ local function CreateGui()
 	print("Loading Emoter GUI...")
 
 	local SpeedNum = 0 --Value, adding to default speed of animation
-	local AnimInfo = Instance.new("StringValue")
-	local AddedDataInfo = Instance.new("StringValue")
+	local AnimInfo = __SIEXTHER_VIP_GLASS_V1.Instance.new("StringValue")
+	local AddedDataInfo = __SIEXTHER_VIP_GLASS_V1.Instance.new("StringValue")
 	local NegativeNumber = 1
 	local DefaultWalkSpeed = 16
 	local SFHideTimeCount = 0
@@ -416,126 +1043,126 @@ local function CreateGui()
 	ToolIdleAnimsList = {"ToolNoneAnim", "507768375", "182393478"}
 	ToolActionAnimsList = {"ToolLungeAnim", "ToolSlashAnim", "522638767", "522635514", "129967390", "129967478"}
 
-	Emoter = Instance.new("ScreenGui") --The actual GUI
-	MainFrame = Instance.new("Frame") --All of the stuff on the main frame
-	local MFUIScale = Instance.new("UIScale", MainFrame)
-	ViewportFrame = Instance.new("ViewportFrame") --Frame with animation preview
+	Emoter = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScreenGui") --The actual GUI
+	MainFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame") --All of the stuff on the main frame
+	local MFUIScale = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIScale", MainFrame)
+	ViewportFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("ViewportFrame") --Frame with animation preview
 
-	SideFrame = Instance.new("CanvasGroup") --Visible when GUI is closed
-	local SFUIScale = Instance.new("UIScale", SideFrame)
-	SideFrameTitle = Instance.new("TextLabel")
-	OpenGUI = Instance.new("ImageButton")
-	SFDestroyGUI = Instance.new("TextButton")
+	SideFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("CanvasGroup") --Visible when GUI is closed
+	local SFUIScale = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIScale", SideFrame)
+	SideFrameTitle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
+	OpenGUI = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	SFDestroyGUI = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 
-	GuiTopFrame = Instance.new("Frame") --Top of the main frame
-	DestroyGUI = Instance.new("TextButton")
-	CloseGUI = Instance.new("ImageButton")
-	Title = Instance.new("TextLabel")
+	GuiTopFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame") --Top of the main frame
+	DestroyGUI = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	CloseGUI = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	Title = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 
-	GuiBottomFrame = Instance.new("Frame") --Bottom of the main frame
-	SpeedFrame = Instance.new("Frame") -- Frame of Speed Changer
-	CurAnimInfoTitle = Instance.new("TextLabel")
-	OptionsButton = Instance.new("ImageButton")
+	GuiBottomFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame") --Bottom of the main frame
+	SpeedFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame") -- Frame of Speed Changer
+	CurAnimInfoTitle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
+	OptionsButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
 
-	ScrollingFrame = Instance.new("ScrollingFrame") --Scrolling frame of R6 animations
-	ScrollingFrameR15 = Instance.new("ScrollingFrame") --Scrolling frame of R15 animations
-	ScrollingFrameSpecific = Instance.new("ScrollingFrame") --Scrolling frame of specific game animations
+	ScrollingFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScrollingFrame") --Scrolling frame of R6 animations
+	ScrollingFrameR15 = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScrollingFrame") --Scrolling frame of R15 animations
+	ScrollingFrameSpecific = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScrollingFrame") --Scrolling frame of specific game animations
 	ScrollingFramesList = {
 		ScrollingFrame,
 		ScrollingFrameR15,
 		ScrollingFrameSpecific
 	}
 
-	OptionsFrame = Instance.new("Frame") --Frame of additional options
-	StopAnimsEvent = Instance.new("BindableEvent") --Event to stop animations when disabling StopDefaultAnims option
-	PauseAnimsButton = Instance.new("ImageButton")
+	OptionsFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame") --Frame of additional options
+	StopAnimsEvent = __SIEXTHER_VIP_GLASS_V1.Instance.new("BindableEvent") --Event to stop animations when disabling StopDefaultAnims option
+	PauseAnimsButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
 	PauseAnimsOption = false
-	StopDefAnimsButton = Instance.new("ImageButton")
-	PauseAnimateButton = Instance.new("ImageButton")
-	SitButton = Instance.new("ImageButton")
-	ReversePlayButton = Instance.new("ImageButton")
-	EmoteWheelButton = Instance.new("ImageButton")
+	StopDefAnimsButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	PauseAnimateButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	SitButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	ReversePlayButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	EmoteWheelButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
 
-	SearchFrame = Instance.new("Frame") --Frame for searching anims
-	SearchButton = Instance.new("ImageButton")
-	SearchBox = Instance.new("TextBox")
-	BackButton = Instance.new("ImageButton")
+	SearchFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame") --Frame for searching anims
+	SearchButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	SearchBox = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextBox")
+	BackButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
 
-	CustomAnimFrame = Instance.new("Frame") --Frame for adding anims by it's Id
-	CustomAnimButton = Instance.new("ImageButton")
-	IdBox = Instance.new("TextBox")
-	CustomAnimBackButton = Instance.new("ImageButton")
-	AddTempAnimButton = Instance.new("ImageButton")
+	CustomAnimFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame") --Frame for adding anims by it's Id
+	CustomAnimButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	IdBox = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextBox")
+	CustomAnimBackButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	AddTempAnimButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
 
-	DefaultSection = Instance.new("TextButton") --Sections in case when you have specific game anims
-	SpecGameSection = Instance.new("TextButton")
+	DefaultSection = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton") --Sections in case when you have specific game anims
+	SpecGameSection = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 
-	EmoteWheel = Instance.new("Frame") --Emote wheel 
-	EmoteWheelText = Instance.new("TextLabel")
-	Emote1 = Instance.new("TextButton")
-	Emote2 = Instance.new("TextButton")
-	Emote3 = Instance.new("TextButton")
-	Emote4 = Instance.new("TextButton")
-	Emote5 = Instance.new("TextButton")
-	Emote6 = Instance.new("TextButton")
-	Emote7 = Instance.new("TextButton")
-	Emote8 = Instance.new("TextButton")
+	EmoteWheel = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame") --Emote wheel 
+	EmoteWheelText = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
+	Emote1 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	Emote2 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	Emote3 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	Emote4 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	Emote5 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	Emote6 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	Emote7 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	Emote8 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 
-	SettingsFrame = Instance.new("Frame") --Settings
-	GuiName = Instance.new("TextLabel")
-	AutorText = Instance.new("TextLabel")
-	VersionText = Instance.new("TextLabel")
-	local WarningText = Instance.new("TextLabel")
-	SGSNotification = Instance.new("ImageButton")
-	DataNotification = Instance.new("ImageButton")
-	SettingsStuff = Instance.new("ScrollingFrame")
-	DragDelayOption = Instance.new("Frame")
-	DragOptionText = Instance.new("TextLabel")
-	DelayNumBox = Instance.new("TextBox")
-	ThemeOption = Instance.new("Frame")
-	ThemeOptionText = Instance.new("TextLabel")
-	PurpleThemeColor = Instance.new("TextButton")
-	OrangeThemeColor = Instance.new("TextButton")
-	YellowThemeColor = Instance.new("TextButton")
-	BlackThemeColor = Instance.new("TextButton")
-	HotkeysEditOption = Instance.new("TextButton")
-	HotkeysFrame = Instance.new("Frame")
-	HotkeysStuff = Instance.new("ScrollingFrame")
-	HotkeyFrameName = Instance.new("TextLabel")
-	MoreButtonsFrame = Instance.new("Frame")
-	SaveSettingsButton = Instance.new("ImageButton")
-	LaunchIdDetectorButton = Instance.new("ImageButton")
-	ResetButton = Instance.new("ImageButton")
-	GithubLinkButton = Instance.new("ImageButton")
+	SettingsFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame") --Settings
+	GuiName = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
+	AutorText = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
+	VersionText = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
+	local WarningText = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
+	SGSNotification = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	DataNotification = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	SettingsStuff = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScrollingFrame")
+	DragDelayOption = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
+	DragOptionText = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
+	DelayNumBox = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextBox")
+	ThemeOption = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
+	ThemeOptionText = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
+	PurpleThemeColor = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	OrangeThemeColor = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	YellowThemeColor = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	BlackThemeColor = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	HotkeysEditOption = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+	HotkeysFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
+	HotkeysStuff = __SIEXTHER_VIP_GLASS_V1.Instance.new("ScrollingFrame")
+	HotkeyFrameName = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
+	MoreButtonsFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
+	SaveSettingsButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	LaunchIdDetectorButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	ResetButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
+	GithubLinkButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
 
 	if Theme == "LightOrange" then
-		BgColor = Color3.fromRGB(255, 171, 35)
-		ScrollBgColor = Color3.fromRGB(240, 255, 255)
-		UiButColor = Color3.new(0, 0, 0)
-		TextBgColor = Color3.fromRGB(255, 255, 255)
-		ButtonCol = Color3.fromRGB(192, 191, 211)
-		ButtonSelectCol = Color3.fromRGB(255, 255, 255)
+		BgColor = __SIEXTHER_VIP_GLASS_V1.bgColor
+		ScrollBgColor = __SIEXTHER_VIP_GLASS_V1.buttonColor
+		UiButColor = __SIEXTHER_VIP_GLASS_V1.textColor
+		TextBgColor = __SIEXTHER_VIP_GLASS_V1.buttonColor
+		ButtonCol = __SIEXTHER_VIP_GLASS_V1.buttonColor
+		ButtonSelectCol = __SIEXTHER_VIP_GLASS_V1.primaryColor
 	elseif Theme == "LightPurple" then
-		BgColor = Color3.fromRGB(137, 165, 255)
-		ScrollBgColor = Color3.fromRGB(240, 255, 255)
-		UiButColor = Color3.new(0, 0, 0)
-		TextBgColor = Color3.fromRGB(255, 255, 255)
-		ButtonCol = Color3.fromRGB(192, 191, 211)
-		ButtonSelectCol = Color3.fromRGB(255, 255, 255)
+		BgColor = __SIEXTHER_VIP_GLASS_V1.bgColor
+		ScrollBgColor = __SIEXTHER_VIP_GLASS_V1.buttonColor
+		UiButColor = __SIEXTHER_VIP_GLASS_V1.textColor
+		TextBgColor = __SIEXTHER_VIP_GLASS_V1.buttonColor
+		ButtonCol = __SIEXTHER_VIP_GLASS_V1.buttonColor
+		ButtonSelectCol = __SIEXTHER_VIP_GLASS_V1.primaryColor
 	elseif Theme == "LightYellow" then
-		BgColor = Color3.fromRGB(255, 250, 112)
-		ScrollBgColor = Color3.fromRGB(240, 255, 255)
-		UiButColor = Color3.new(0, 0, 0)
-		TextBgColor = Color3.fromRGB(255, 255, 255)
-		ButtonCol = Color3.fromRGB(192, 191, 211)
-		ButtonSelectCol = Color3.fromRGB(255, 255, 255)
+		BgColor = __SIEXTHER_VIP_GLASS_V1.bgColor
+		ScrollBgColor = __SIEXTHER_VIP_GLASS_V1.buttonColor
+		UiButColor = __SIEXTHER_VIP_GLASS_V1.textColor
+		TextBgColor = __SIEXTHER_VIP_GLASS_V1.buttonColor
+		ButtonCol = __SIEXTHER_VIP_GLASS_V1.buttonColor
+		ButtonSelectCol = __SIEXTHER_VIP_GLASS_V1.primaryColor
 	elseif Theme == "Black" then
-		BgColor = Color3.fromRGB(65, 65, 65)
-		ScrollBgColor = Color3.fromRGB(20, 20, 20)
-		UiButColor = Color3.new(1, 1, 1)
-		TextBgColor = Color3.fromRGB(30, 30, 30)
-		ButtonCol = Color3.fromRGB(65, 65, 65)
-		ButtonSelectCol = Color3.fromRGB(129, 129, 129)
+		BgColor = __SIEXTHER_VIP_GLASS_V1.bgColor
+		ScrollBgColor = __SIEXTHER_VIP_GLASS_V1.buttonColor
+		UiButColor = __SIEXTHER_VIP_GLASS_V1.textColor
+		TextBgColor = __SIEXTHER_VIP_GLASS_V1.buttonColor
+		ButtonCol = __SIEXTHER_VIP_GLASS_V1.buttonColor
+		ButtonSelectCol = __SIEXTHER_VIP_GLASS_V1.primaryColor
 	end
 
 	local function AddVPF()
@@ -548,14 +1175,14 @@ local function CreateGui()
 		ViewportFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
 		ViewportFrame.Ambient = Color3.fromRGB(175, 175, 175)
 		ViewportFrame.LightColor = Color3.fromRGB(208, 208, 208)
-		local UICorner = Instance.new("UICorner")
+		local UICorner = __SIEXTHER_VIP_GLASS_V1.Instance.new("UICorner")
 		UICorner.Parent = ViewportFrame
-		local UIStroke = Instance.new("UIStroke")
+		local UIStroke = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIStroke")
 		UIStroke.Parent = ViewportFrame
 		UIStroke.Thickness = 1
 		UIStroke.BorderStrokePosition = Enum.BorderStrokePosition.Outer
 
-		local WorldModel = Instance.new("WorldModel")
+		local WorldModel = __SIEXTHER_VIP_GLASS_V1.Instance.new("WorldModel")
 		WorldModel.Parent = ViewportFrame
 		local Character = nil
 		local function WaitForChar()
@@ -569,7 +1196,7 @@ local function CreateGui()
 		end
 		WaitForChar()
 		wait(0.5)
-		local VPFcam = Instance.new("Camera"); VPFcam.Parent = ViewportFrame
+		local VPFcam = __SIEXTHER_VIP_GLASS_V1.Instance.new("Camera"); VPFcam.Parent = ViewportFrame
 		VPFcam.CameraType = Enum.CameraType.Scriptable
 
 		local targetPosition = nil
@@ -602,7 +1229,7 @@ local function CreateGui()
 	local function AddHoverText(Object, Text, Hotkey)
 		local TextLabel = nil
 		Object.MouseEnter:connect(function()
-			TextLabel = Instance.new("TextLabel")
+			TextLabel = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 			TextLabel.Parent = Emoter
 			TextLabel.Visible = false
 			TextLabel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
@@ -628,13 +1255,13 @@ local function CreateGui()
 				TextLabel.Text = Text
 			end
 
-			local UIPadding = Instance.new("UIPadding")
+			local UIPadding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 			UIPadding.PaddingLeft = UDim.new(0, 2)
 			UIPadding.PaddingRight = UDim.new(0, 2)
 			UIPadding.PaddingBottom = UDim.new(0, 2)
 			UIPadding.Parent = TextLabel
 
-			local UISizeConstraint = Instance.new("UISizeConstraint")
+			local UISizeConstraint = __SIEXTHER_VIP_GLASS_V1.Instance.new("UISizeConstraint")
 			UISizeConstraint.Parent = TextLabel
 			UISizeConstraint.MaxSize = Vector2.new(400, 3000)
 
@@ -723,23 +1350,23 @@ local function CreateGui()
 		Button.TextScaled = true
 		Button.LayoutOrder = LayoutPos
 
-		local UIStroke = Instance.new("UIStroke")
+		local UIStroke = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIStroke")
 		UIStroke.Parent = Button
 		UIStroke.Thickness = 1
 		UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		if UICornerEnabled then
-			local UICorner = Instance.new("UICorner")
+			local UICorner = __SIEXTHER_VIP_GLASS_V1.Instance.new("UICorner")
 			UICorner.Parent = Button
 			UICorner.CornerRadius = UDim.new(0, 3)
 		end
 		if UIGradientEnabled then
-			local UIGradient = Instance.new("UIGradient")
+			local UIGradient = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIGradient")
 			UIGradient.Parent = Button
 			UIGradient.Color = ColorSequence.new(Color3.fromRGB(207, 207, 207), Color3.fromRGB(255, 255, 255))
 			UIGradient.Rotation = -90
 		end
 
-		local ButtonPadding = Instance.new("UIPadding")
+		local ButtonPadding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 		ButtonPadding.Parent = Button
 		ButtonPadding.PaddingLeft = UDim.new(0, 2)
 		ButtonPadding.PaddingRight = UDim.new(0, 2)
@@ -773,7 +1400,7 @@ local function CreateGui()
 		end
 
 		local Humanoid = Player.Character:WaitForChild("Humanoid")
-		local Anim = Instance.new("Animation")
+		local Anim = __SIEXTHER_VIP_GLASS_V1.Instance.new("Animation")
 		Anim.Name = "AAnimation"
 		Anim.AnimationId = "rbxassetid://"..ID
 		local track = Humanoid:WaitForChild("Animator"):LoadAnimation(Anim)
@@ -1006,10 +1633,10 @@ local function CreateGui()
 
 		Button.Changed:connect(function()
 			if GuiRestarted == true or GuiActive == false or not AnimLoaded then return end
-			if Button.BackgroundColor3 == ButtonCol and AnimACTIVE then
+			if __SIEXTHER_VIP_GLASS_V1.Read(Button, "BackgroundColor3") == ButtonCol and AnimACTIVE then
 				AnimACTIVE = false
 				StopAnim()
-			elseif Button.BackgroundColor3 == ButtonSelectCol and not AnimACTIVE then
+			elseif __SIEXTHER_VIP_GLASS_V1.Read(Button, "BackgroundColor3") == ButtonSelectCol and not AnimACTIVE then
 				AnimACTIVE = true
 				StartAnim()
 			end
@@ -1342,7 +1969,7 @@ local function CreateGui()
 	end
 
 	local function AddSettings(Setting, Title, Text, LayoutOrder)
-		local OptionButton = Instance.new("TextButton")
+		local OptionButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		OptionButton.Name = Title
 		OptionButton.Size = UDim2.new(1, 0, 0, 25)
 		OptionButton.BackgroundTransparency = 1
@@ -1351,7 +1978,7 @@ local function CreateGui()
 		OptionButton.TextTransparency = 1
 		OptionButton.Parent = SettingsStuff
 
-		local CheckImage = Instance.new("ImageLabel")
+		local CheckImage = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageLabel")
 		CheckImage.Name = "CheckImage"
 		CheckImage.AnchorPoint = Vector2.new(0, 0.5)
 		CheckImage.Size = UDim2.new(0, 15, 0, 15)
@@ -1368,17 +1995,17 @@ local function CreateGui()
 			CheckImage.Image = ""
 		end
 
-		local UIStroke = Instance.new("UIStroke")
+		local UIStroke = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIStroke")
 		UIStroke.Parent = CheckImage
 
-		local UIListLayout = Instance.new("UIListLayout")
+		local UIListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 		UIListLayout.FillDirection = Enum.FillDirection.Horizontal
 		UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 		UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 		UIListLayout.Padding = UDim.new(0, 5)
 		UIListLayout.Parent = OptionButton
 
-		local TextLabel = Instance.new("TextLabel")
+		local TextLabel = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 		TextLabel.Size = UDim2.new(0.9500334, -10, 0, 25)
 		TextLabel.BackgroundTransparency = 1
 		TextLabel.Position = UDim2.new(0.115608, 0, 0, 0)
@@ -1389,7 +2016,7 @@ local function CreateGui()
 		TextLabel.TextXAlignment = Enum.TextXAlignment.Left
 		TextLabel.Parent = OptionButton
 
-		local UIPadding = Instance.new("UIPadding")
+		local UIPadding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 		UIPadding.PaddingBottom = UDim.new(0, 2)
 		UIPadding.Parent = TextLabel
 	end
@@ -1429,10 +2056,10 @@ local function CreateGui()
 
 		if HotkeysStuff:FindFirstChild(FrameName) then return end
 
-		local HotkeyFrame = Instance.new("Frame")
-		local HotkeyText = Instance.new("TextLabel")
-		local RebindButton = Instance.new("TextButton")
-		local DoubleButton = Instance.new("TextButton")
+		local HotkeyFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
+		local HotkeyText = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
+		local RebindButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
+		local DoubleButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 
 		HotkeyFrame.Name = FrameName
 		HotkeyFrame.Size = UDim2.new(1, 0, 0, 25)
@@ -1448,7 +2075,7 @@ local function CreateGui()
 		HotkeyText.Font = Enum.Font.SourceSans
 		HotkeyText.TextXAlignment = Enum.TextXAlignment.Left
 		HotkeyText.Parent = HotkeyFrame
-		local UIPadding = Instance.new("UIPadding")
+		local UIPadding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 		UIPadding.PaddingBottom = UDim.new(0, 2)
 		UIPadding.Parent = HotkeyText
 
@@ -1486,7 +2113,7 @@ local function CreateGui()
 			RebindButton.Size = UDim2.new(0, 65, 0, 21)
 			DoubleButton:Destroy() 
 		elseif FrameName == "EmoteWheelHotkey" then
-			local SeparateFrame = Instance.new("Frame")
+			local SeparateFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 			SeparateFrame.Size = UDim2.new(1, 0, 0, 10)
 			SeparateFrame.BackgroundTransparency = 1
 			SeparateFrame.Parent = HotkeysStuff
@@ -1570,9 +2197,9 @@ local function CreateGui()
 		end
 		if HasButton == false then return end
 
-		local DivideFrame = Instance.new("Frame")
-		local Line = Instance.new("Frame")
-		local TextLabel = Instance.new("TextLabel")
+		local DivideFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
+		local Line = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
+		local TextLabel = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 
 		DivideFrame.Name = "DivideFrame"
 		DivideFrame.Size = UDim2.new(0.98, 0, 0, 18)
@@ -1600,7 +2227,7 @@ local function CreateGui()
 		TextLabel.Font = Enum.Font.SourceSansBold
 		TextLabel.Parent = DivideFrame
 
-		local UIPadding = Instance.new("UIPadding")
+		local UIPadding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 		UIPadding.PaddingLeft = UDim.new(0, 8)
 		UIPadding.PaddingRight = UDim.new(0, 10)
 		UIPadding.Parent = TextLabel
@@ -1691,7 +2318,7 @@ local function CreateGui()
 	SideFrame.Visible = false
 	SideFrame.Position = UDim2.new(0, 10, 0, 10)
 
-	local UIDragDetectorSideFrame = Instance.new("UIDragDetector")
+	local UIDragDetectorSideFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIDragDetector")
 	UIDragDetectorSideFrame.Parent = SideFrame
 	UIDragDetectorSideFrame.DragStyle = Enum.UIDragDetectorDragStyle.Scriptable
 	UIDragDetectorSideFrame.ResponseStyle = Enum.UIDragDetectorResponseStyle.CustomOffset
@@ -1778,7 +2405,7 @@ local function CreateGui()
 	CloseGUI.ImageColor3 = UiButColor
 	AddHoverText(CloseGUI, "Open/Close GUI", CloseHotkey)
 
-	local SettingsButton = Instance.new("ImageButton")
+	local SettingsButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("ImageButton")
 	SettingsButton.Parent = GuiTopFrame
 	SettingsButton.Name = "SettingsButton"
 	SettingsButton.BorderSizePixel = 0
@@ -1804,7 +2431,7 @@ local function CreateGui()
 	Title.TextStrokeTransparency = 0
 	Title.TextWrapped = false
 
-	local UIDragDetectorGuiTopFrame = Instance.new("UIDragDetector")
+	local UIDragDetectorGuiTopFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIDragDetector")
 	UIDragDetectorGuiTopFrame.Parent = GuiTopFrame
 	UIDragDetectorGuiTopFrame.DragStyle = Enum.UIDragDetectorDragStyle.Scriptable
 	UIDragDetectorGuiTopFrame.ResponseStyle = Enum.UIDragDetectorResponseStyle.CustomOffset
@@ -1825,7 +2452,7 @@ local function CreateGui()
 	SpeedFrame.BackgroundTransparency = 1
 	SpeedFrame.Active = true
 
-	local SFLayout = Instance.new("UIGridLayout")
+	local SFLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIGridLayout")
 	SFLayout.Name = "UIGridLayout"
 	SFLayout.Parent = SpeedFrame
 	SFLayout.FillDirection = Enum.FillDirection.Vertical
@@ -1844,7 +2471,7 @@ local function CreateGui()
 	OptionsButton.Image = "rbxassetid://80468028389803"
 	AddHoverText(OptionsButton, "Options")
 
-	local SpeedValue = Instance.new("TextBox")
+	local SpeedValue = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextBox")
 	SpeedValue.Parent = SpeedFrame
 	SpeedValue.Name = "SpeedValue"
 	SpeedValue.ClearTextOnFocus = false
@@ -1860,7 +2487,7 @@ local function CreateGui()
 	SpeedValue.TextScaled = true
 	AddHoverText(SpeedValue, "Enter a number to add speed")
 
-	local ValueText = Instance.new("TextLabel")
+	local ValueText = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 	ValueText.Name = "ValueText"
 	ValueText.Parent = SpeedFrame
 	ValueText.Size = UDim2.new(0, 200, 0, 50)
@@ -1899,7 +2526,7 @@ local function CreateGui()
 	ScrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	ScrollingFrame.ScrollBarThickness = 10
 
-	local SF6UIListLayout = Instance.new("UIListLayout")
+	local SF6UIListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	SF6UIListLayout.Parent = ScrollingFrame
 	SF6UIListLayout.FillDirection = Enum.FillDirection.Horizontal
 	SF6UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -1918,7 +2545,7 @@ local function CreateGui()
 	ScrollingFrameR15.Visible = false
 	ScrollingFrameR15.ScrollBarThickness = 10
 
-	local SF15UIListLayout = Instance.new("UIListLayout")
+	local SF15UIListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	SF15UIListLayout.Parent = ScrollingFrameR15
 	SF15UIListLayout.FillDirection = Enum.FillDirection.Horizontal
 	SF15UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -1937,7 +2564,7 @@ local function CreateGui()
 	ScrollingFrameSpecific.Visible = false
 	ScrollingFrameSpecific.ScrollBarThickness = 10
 
-	local SFSpecListLayout = Instance.new("UIListLayout")
+	local SFSpecListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	SFSpecListLayout.Parent = ScrollingFrameSpecific
 	SFSpecListLayout.FillDirection = Enum.FillDirection.Horizontal
 	SFSpecListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -1958,7 +2585,7 @@ local function CreateGui()
 	OptionsFrame.BackgroundColor3 = ScrollBgColor
 	OptionsFrame.ZIndex = -1
 
-	local OFUIGridLayout = Instance.new("UIGridLayout")
+	local OFUIGridLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIGridLayout")
 	OFUIGridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	OFUIGridLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 	OFUIGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -2100,7 +2727,7 @@ local function CreateGui()
 	BackButton.Parent = SearchFrame
 	AddHoverText(BackButton, "Hide")
 
-	local SFUIListLayout = Instance.new("UIListLayout")
+	local SFUIListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	SFUIListLayout.FillDirection = Enum.FillDirection.Horizontal
 	SFUIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
 	SFUIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
@@ -2166,7 +2793,7 @@ local function CreateGui()
 	CustomAnimBackButton.Parent = CustomAnimFrame
 	AddHoverText(CustomAnimBackButton, "Hide")
 
-	local CAFUIListLayout = Instance.new("UIListLayout")
+	local CAFUIListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	CAFUIListLayout.FillDirection = Enum.FillDirection.Horizontal
 	CAFUIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
 	CAFUIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
@@ -2239,10 +2866,10 @@ local function CreateGui()
 	EmoteWheel.BackgroundTransparency = 1
 	EmoteWheel.Position = UDim2.new(0.5, 0, 0.5, 0)
 	EmoteWheel.Visible = false
-	local UIAspectRatioConstraint = Instance.new("UIAspectRatioConstraint")
+	local UIAspectRatioConstraint = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIAspectRatioConstraint")
 	UIAspectRatioConstraint.Parent = EmoteWheel
 
-	local ShadowFrame = Instance.new("Frame")
+	local ShadowFrame = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 	ShadowFrame.Parent = EmoteWheel
 	ShadowFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 	ShadowFrame.Size = UDim2.new(1, 0, 1, 0)
@@ -2250,17 +2877,17 @@ local function CreateGui()
 	ShadowFrame.BackgroundTransparency = 1
 	ShadowFrame.ZIndex = 100
 
-	local UICorner = Instance.new("UICorner")
+	local UICorner = __SIEXTHER_VIP_GLASS_V1.Instance.new("UICorner")
 	UICorner.Parent = ShadowFrame
 	UICorner.CornerRadius = UDim.new(1, 0)
 
-	local OutUIShadow = Instance.new("UIShadow")
+	local OutUIShadow = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIShadow")
 	OutUIShadow.Parent = ShadowFrame
 	OutUIShadow.BlurRadius = UDim.new(0, 15)
 	OutUIShadow.Transparency = 0.35
 	OutUIShadow.Spread = UDim2.new(0.19, 0, 0.19, 0)
 	OutUIShadow.ZIndex = 100
-	local InUIShadow = Instance.new("UIShadow")
+	local InUIShadow = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIShadow")
 	InUIShadow.Parent = ShadowFrame
 	InUIShadow.BlurRadius = UDim.new(0, 15)
 	InUIShadow.Transparency = 0.35
@@ -2388,12 +3015,12 @@ local function CreateGui()
 	SettingsFrame.BackgroundColor3 = ScrollBgColor
 	SettingsFrame.Visible = false
 
-	local UIShadow = Instance.new("UIShadow")
+	local UIShadow = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIShadow")
 	UIShadow.BlurRadius = UDim.new(0, 20)
 	UIShadow.Transparency = 0.5
 	UIShadow.Parent = SettingsFrame
 
-	local UIDragDetectorSettings = Instance.new("UIDragDetector")
+	local UIDragDetectorSettings = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIDragDetector")
 	UIDragDetectorSettings.Parent = SettingsFrame
 	UIDragDetectorSettings.DragStyle = Enum.UIDragDetectorDragStyle.Scriptable
 	UIDragDetectorSettings.ResponseStyle = Enum.UIDragDetectorResponseStyle.CustomOffset
@@ -2482,7 +3109,7 @@ local function CreateGui()
 	WarningText.TextWrapped = true
 	WarningText.Font = Enum.Font.SourceSans
 
-	local UIStroke = Instance.new("UIStroke")
+	local UIStroke = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIStroke")
 	UIStroke.Color = Color3.fromRGB(255, 255, 255)
 	UIStroke.Thickness = 1
 	UIStroke.Parent = WarningText
@@ -2497,7 +3124,7 @@ local function CreateGui()
 	SettingsStuff.ScrollBarThickness = 3
 	SettingsStuff.Parent = SettingsFrame
 
-	local UIListLayout = Instance.new("UIListLayout")
+	local UIListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	UIListLayout.Parent = SettingsStuff
@@ -2508,7 +3135,7 @@ local function CreateGui()
 	ThemeOption.BackgroundTransparency = 1
 	ThemeOption.Parent = SettingsStuff
 
-	local UIListLayout5 = Instance.new("UIListLayout")
+	local UIListLayout5 = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	UIListLayout5.FillDirection = Enum.FillDirection.Horizontal
 	UIListLayout5.VerticalAlignment = Enum.VerticalAlignment.Center
 	UIListLayout5.SortOrder = Enum.SortOrder.LayoutOrder
@@ -2533,7 +3160,7 @@ local function CreateGui()
 	PurpleThemeColor.Parent = ThemeOption
 	AddHoverText(PurpleThemeColor, "Light theme with purple parts")
 
-	local PurpleGradient = Instance.new("UIGradient")
+	local PurpleGradient = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIGradient")
 	PurpleGradient.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(137, 165, 255)), ColorSequenceKeypoint.new(0.4342561, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))})
 	PurpleGradient.Rotation = 90
 	PurpleGradient.Parent = PurpleThemeColor
@@ -2546,7 +3173,7 @@ local function CreateGui()
 	OrangeThemeColor.Parent = ThemeOption
 	AddHoverText(OrangeThemeColor, "Light theme with orange parts")
 
-	local OrangeGradient = Instance.new("UIGradient")
+	local OrangeGradient = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIGradient")
 	OrangeGradient.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 171, 35)), ColorSequenceKeypoint.new(0.4342561, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))})
 	OrangeGradient.Rotation = 90
 	OrangeGradient.Parent = OrangeThemeColor
@@ -2559,7 +3186,7 @@ local function CreateGui()
 	YellowThemeColor.Parent = ThemeOption
 	AddHoverText(YellowThemeColor, "Light theme with yellow parts")
 
-	local YellowGradient = Instance.new("UIGradient")
+	local YellowGradient = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIGradient")
 	YellowGradient.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 250, 112)), ColorSequenceKeypoint.new(0.4342561, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))})
 	YellowGradient.Rotation = 90
 	YellowGradient.Parent = YellowThemeColor
@@ -2573,21 +3200,21 @@ local function CreateGui()
 	BlackThemeColor.Parent = ThemeOption
 	AddHoverText(BlackThemeColor, "Black theme")
 
-	local YSizeOption = Instance.new("Frame")
+	local YSizeOption = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 	YSizeOption.Parent = SettingsStuff
 	YSizeOption.Name = "YSizeOptionOption"
 	YSizeOption.Size = UDim2.new(1, 0, 0, 25)
 	YSizeOption.LayoutOrder = 3
 	YSizeOption.BackgroundTransparency = 1
 
-	local UIListLayout = Instance.new("UIListLayout")
+	local UIListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	UIListLayout.FillDirection = Enum.FillDirection.Horizontal
 	UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	UIListLayout.Padding = UDim.new(0, 5)
 	UIListLayout.Parent = YSizeOption
 
-	local YSizeOptionText = Instance.new("TextLabel")
+	local YSizeOptionText = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 	YSizeOptionText.Name = "YSizeOptionText"
 	YSizeOptionText.Size = UDim2.new(0, 94, 0, 25)
 	YSizeOptionText.BackgroundTransparency = 1
@@ -2598,11 +3225,11 @@ local function CreateGui()
 	YSizeOptionText.TextXAlignment = Enum.TextXAlignment.Left
 	YSizeOptionText.Parent = YSizeOption
 
-	local UIPadding = Instance.new("UIPadding")
+	local UIPadding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 	UIPadding.PaddingBottom = UDim.new(0, 2)
 	UIPadding.Parent = YSizeOptionText
 
-	local X05YSixe = Instance.new("TextButton")
+	local X05YSixe = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 	X05YSixe.Name = "X05YSixe"
 	X05YSixe.Size = UDim2.new(0, 25, 0, 15)
 	X05YSixe.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -2610,7 +3237,7 @@ local function CreateGui()
 	X05YSixe.Text = "0.5x"
 	X05YSixe.Parent = YSizeOption
 
-	local X1YSize = Instance.new("TextButton")
+	local X1YSize = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 	X1YSize.Name = "X1YSize"
 	X1YSize.Size = UDim2.new(0, 20, 0, 15)
 	X1YSize.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -2619,7 +3246,7 @@ local function CreateGui()
 	X1YSize.Text = "1x"
 	X1YSize.Parent = YSizeOption
 
-	local X15YSize = Instance.new("TextButton")
+	local X15YSize = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 	X15YSize.Name = "X15YSize"
 	X15YSize.Size = UDim2.new(0, 25, 0, 15)
 	X15YSize.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -2627,7 +3254,7 @@ local function CreateGui()
 	X15YSize.Text = "1.5x"
 	X15YSize.Parent = YSizeOption
 
-	local X2YSize = Instance.new("TextButton")
+	local X2YSize = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 	X2YSize.Name = "X2YSize"
 	X2YSize.Size = UDim2.new(0, 20, 0, 15)
 	X2YSize.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -2635,21 +3262,21 @@ local function CreateGui()
 	X2YSize.Text = "2x"
 	X2YSize.Parent = YSizeOption
 
-	local XSizeOption = Instance.new("Frame")
+	local XSizeOption = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 	XSizeOption.Parent = SettingsStuff
 	XSizeOption.Name = "XSizeOption"
 	XSizeOption.Size = UDim2.new(1, 0, 0, 25)
 	XSizeOption.LayoutOrder = 3
 	XSizeOption.BackgroundTransparency = 1
 
-	local UIListLayout = Instance.new("UIListLayout")
+	local UIListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	UIListLayout.FillDirection = Enum.FillDirection.Horizontal
 	UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	UIListLayout.Padding = UDim.new(0, 5)
 	UIListLayout.Parent = XSizeOption
 
-	local XSizeOptionText = Instance.new("TextLabel")
+	local XSizeOptionText = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 	XSizeOptionText.Name = "XSizeOptionText"
 	XSizeOptionText.Size = UDim2.new(0, 104, 0, 25)
 	XSizeOptionText.BackgroundTransparency = 1
@@ -2660,11 +3287,11 @@ local function CreateGui()
 	XSizeOptionText.TextXAlignment = Enum.TextXAlignment.Left
 	XSizeOptionText.Parent = XSizeOption
 
-	local UIPadding = Instance.new("UIPadding")
+	local UIPadding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 	UIPadding.PaddingBottom = UDim.new(0, 2)
 	UIPadding.Parent = XSizeOptionText
 
-	local X2Size = Instance.new("TextButton")
+	local X2Size = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 	X2Size.Name = "X2Sixe"
 	X2Size.Size = UDim2.new(0, 20, 0, 15)
 	X2Size.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -2672,7 +3299,7 @@ local function CreateGui()
 	X2Size.Text = "2x"
 	X2Size.Parent = XSizeOption
 
-	local X3Size = Instance.new("TextButton")
+	local X3Size = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 	X3Size.Name = "X3Size"
 	X3Size.Size = UDim2.new(0, 20, 0, 15)
 	X3Size.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -2680,7 +3307,7 @@ local function CreateGui()
 	X3Size.Text = "3x"
 	X3Size.Parent = XSizeOption
 
-	local X4Size = Instance.new("TextButton")
+	local X4Size = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 	X4Size.Name = "X4Size"
 	X4Size.Size = UDim2.new(0, 20, 0, 15)
 	X4Size.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -2688,7 +3315,7 @@ local function CreateGui()
 	X4Size.Text = "4x"
 	X4Size.Parent = XSizeOption
 
-	local X5Size = Instance.new("TextButton")
+	local X5Size = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 	X5Size.Name = "X5Size"
 	X5Size.Size = UDim2.new(0, 20, 0, 15)
 	X5Size.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -2734,7 +3361,7 @@ local function CreateGui()
 	DragDelayOption.BackgroundTransparency = 1
 	AddHoverText(DragDelayOption, "Number of drag smoothness. Еhe higher the number the smoother and slower GUI element will move. If at 0, it will move without smooth")
 
-	local UIListLayout = Instance.new("UIListLayout")
+	local UIListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	UIListLayout.FillDirection = Enum.FillDirection.Horizontal
 	UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -2776,7 +3403,7 @@ local function CreateGui()
 	HotkeysEditOption.Font = Enum.Font.SourceSans
 	HotkeysEditOption.Parent = SettingsStuff
 
-	local UIListLayout7 = Instance.new("UIListLayout")
+	local UIListLayout7 = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	UIListLayout7.FillDirection = Enum.FillDirection.Horizontal
 	UIListLayout7.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	UIListLayout7.VerticalAlignment = Enum.VerticalAlignment.Center
@@ -2805,7 +3432,7 @@ local function CreateGui()
 	HotkeysStuff.ScrollBarThickness = 3
 	HotkeysStuff.Parent = HotkeysFrame
 
-	local UIListLayout8 = Instance.new("UIListLayout")
+	local UIListLayout8 = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	UIListLayout8.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	UIListLayout8.SortOrder = Enum.SortOrder.LayoutOrder
 	UIListLayout8.Parent = HotkeysStuff
@@ -2830,7 +3457,7 @@ local function CreateGui()
 	MoreButtonsFrame.BackgroundTransparency = 1
 	MoreButtonsFrame.Position = UDim2.new(0, 0, 1, 0)
 
-	local UIListLayout = Instance.new("UIListLayout")
+	local UIListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 	UIListLayout.FillDirection = Enum.FillDirection.Horizontal
 	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
@@ -3156,14 +3783,14 @@ local function CreateGui()
 		end
 
 		if SameResult == false then
-			local Anim = Instance.new("TextButton")
+			local Anim = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 			if RigType == "R6" then
 				CreateAnimButton(Anim, IdBox.Text, IdBox.Text, "R6", 0)
 			else
 				CreateAnimButton(Anim, IdBox.Text, IdBox.Text, "R15", 0)
 			end
 			PlayAnim(Anim, IdBox.Text, .1, 1, "PriorLow", false)
-			local UiStroke = Instance.new("UIStroke")
+			local UiStroke = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIStroke")
 			UiStroke.Parent = Anim
 			UiStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		end
@@ -3385,7 +4012,7 @@ local function CreateGui()
 			local anyTrue = false
 			for _, ScrollFrame in ipairs(ScrollingFramesList) do
 				for _, item in ipairs(ScrollFrame:GetChildren()) do
-					if item:IsA("TextButton") and item.BackgroundColor3 == ButtonSelectCol then
+					if item:IsA("TextButton") and __SIEXTHER_VIP_GLASS_V1.Read(item, "BackgroundColor3") == ButtonSelectCol then
 						anyTrue = true
 						break
 					end
@@ -3824,7 +4451,7 @@ local function CreateGui()
 	end)
 
 	LaunchIdDetectorButton.MouseButton1Click:Connect(function()
-		loadstring(game:HttpGet("https://raw.githubusercontent.com/Fixel656/Emoter-GUI_Roblox-Animations-Script/refs/heads/main/AnimationIdDetector.lua",true))()
+		__SIEXTHER_VIP_GLASS_V1.LoadString(game:HttpGet("https://raw.githubusercontent.com/Fixel656/Emoter-GUI_Roblox-Animations-Script/refs/heads/main/AnimationIdDetector.lua",true))()
 	end)
 
 	ResetButton.MouseButton1Click:Connect(function()
@@ -3923,451 +4550,451 @@ local function CreateGui()
 
 	-- R6 Emotes
 	local function R6Anims()
-		local Dance1 = Instance.new("TextButton")
+		local Dance1 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Dance1, "Dance1", "Dance 1", "R6", 1)
 		PlayAnim(Dance1, "182491037", .1, 1, "PriorLow", true)
-		local Dance2 = Instance.new("TextButton")
+		local Dance2 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Dance2, "Dance2", "Dance 2", "R6", 1)
 		PlayAnim(Dance2, "182436842", .1, 1, "PriorLow", true)
-		local Dance3 = Instance.new("TextButton")
+		local Dance3 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Dance3, "Dance3", "Dance 3", "R6", 1)
 		PlayAnim(Dance3, "182491368", .1, 1, "PriorLow", true)
-		local MoonDance = Instance.new("TextButton")
+		local MoonDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(MoonDance, "MoonDance", "Moon Dance", "R6", 1)
 		PlayAnim(MoonDance, "45834924", .1, 1, "PriorLow", true)
-		local SpinDance = Instance.new("TextButton")
+		local SpinDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(SpinDance, "SpinDance", "Spin Dance", "R6", 1)
 		PlayAnim(SpinDance, "429730430", .1, 1, "PriorLow", true)
-		local JumpingJacks = Instance.new("TextButton")
+		local JumpingJacks = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(JumpingJacks, "JumpingJacks", "Jumping Jacks", "R6", 1)
 		PlayAnim(JumpingJacks, "429681631", .1, 1, "PriorLow", true)
-		local Bang = Instance.new("TextButton")
+		local Bang = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Bang, "Bang", "Bang", "R6", 1)
 		PlayAnim(Bang, "148840371", .1, 3, "PriorLow", true)
-		local MovingDance = Instance.new("TextButton")
+		local MovingDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(MovingDance, "MovingDance", "Moving Dance", "R6", 1)
 		PlayAnim(MovingDance, "429703734", .1, 1, "PriorLow", true)
-		local GoofyDance = Instance.new("TextButton")
+		local GoofyDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(GoofyDance, "GoofyDance", "Goofy Dance", "R6", 1)
 		PlayAnim(GoofyDance, "27789359", .1, 0.8, "PriorLow", true)
-		local WeirdDance = Instance.new("TextButton")
+		local WeirdDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(WeirdDance, "WeirdDance", "Weird Dance", "R6", 1)
 		PlayAnim(WeirdDance, "28488254", .1, 0.8, "PriorLow", true)
-		local Laugh = Instance.new("TextButton")
+		local Laugh = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Laugh, "Laugh", "Laugh", "R6", 2)
 		PlayAnim(Laugh, "129423131", .1, 1, "PriorLow", false)
-		local Cheer = Instance.new("TextButton")
+		local Cheer = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Cheer, "Cheer", "Cheer", "R6", 2)
 		PlayAnim(Cheer, "129423030", .1, 1, "PriorLow", false)
-		local Point = Instance.new("TextButton")
+		local Point = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Point, "Point", "Point", "R6", 2)
 		PlayAnim(Point, "128853357", .1, 1, "PriorLow", false)
-		local Wave = Instance.new("TextButton")
+		local Wave = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Wave, "Wave", "Wave", "R6", 2)
 		PlayAnim(Wave, "128777973", .1, 1, "PriorLow", false)
-		local Dab = Instance.new("TextButton")
+		local Dab = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Dab, "Dab", "Dab", "R6", 2)
 		PlayAnim(Dab, "248263260", .1, 1, "PriorLow", true)
-		local ToolHandle = Instance.new("TextButton")
+		local ToolHandle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(ToolHandle, "ToolHandle", "Tool Handle", "R6", 2)
 		PlayAnim(ToolHandle, "125750867", .1, 1, "PriorHigh", true)
-		local Crouch = Instance.new("TextButton")
+		local Crouch = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Crouch, "Crouch", "Crouch", "R6", 3)
 		PlayAnim(Crouch, "182724289", .1, 1, "PriorLow", true)
-		local Faint = Instance.new("TextButton")
+		local Faint = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Faint, "Faint", "Faint", "R6", 3)
 		PlayAnim(Faint, "181526230", .1, 1, "PriorHigh", true)
-		local FloorCrawl = Instance.new("TextButton")
+		local FloorCrawl = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FloorCrawl, "FloorCrawl", "Floor Crawl", "R6", 3)
 		PlayAnim(FloorCrawl, "282574440", .1, 1, "PriorLow", true)
-		local Levitate = Instance.new("TextButton")
+		local Levitate = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Levitate, "Levitate", "Levitate", "R6", 3)
 		PlayAnim(Levitate, "313762630", .1, 1, "PriorHigh", true)
-		local DinoWalk = Instance.new("TextButton")
+		local DinoWalk = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(DinoWalk, "DinoWalk", "Dino Walk", "R6", 3)
 		PlayAnim(DinoWalk, "204328711", .1, 1.5, "PriorLowRunning", true)
-		local Climb = Instance.new("TextButton")
+		local Climb = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Climb, "Climb", "Climb Walk", "R6", 3)
 		PlayAnim(Climb, "125750800", .1, 1, "PriorLow", true)
-		local Scared = Instance.new("TextButton")
+		local Scared = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Scared, "Scared", "Scared", "R6", 3)
 		PlayAnim(Scared, "180612465", .1, 0.3, "PriorLowPause", true)
-		local FloatingHead = Instance.new("TextButton")
+		local FloatingHead = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FloatingHead, "FloatingHead", "Floating Head", "R6", 3)
 		PlayAnim(FloatingHead, "121572214", .1, 1, "PriorHigh", true)
-		local FloatSit = Instance.new("TextButton")
+		local FloatSit = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FloatSit, "FloatSit", "Float Sit", "R6", 3)
 		PlayAnim(FloatSit, "179224234", .5, 1, "PriorLow", true)
-		local Spinner = Instance.new("TextButton")
+		local Spinner = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Spinner, "Spinner", "Spinner", "R6", 4)
 		PlayAnim(Spinner, "188632011", .1, 2, "PriorHigh", true)
-		local StrangePos = Instance.new("TextButton")
+		local StrangePos = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(StrangePos, "StrangePos", "Strange Position", "R6", 4)
 		PlayAnim(StrangePos, "248336459", .1, 1, "PriorLow", true)
-		local HeadThrow = Instance.new("TextButton")
+		local HeadThrow = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(HeadThrow, "HeadThrow", "Head Throw", "R6", 4)
 		PlayAnim(HeadThrow, "35154961", .1, 1, "PriorHigh", false)
-		local ArmTurbine = Instance.new("TextButton")
+		local ArmTurbine = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(ArmTurbine, "ArmTurbine", "Arm Turbine", "R6", 4)
 		PlayAnim(ArmTurbine, "259438880", .1, 3, "PriorLow", true)
-		local BarrelRoll = Instance.new("TextButton")
+		local BarrelRoll = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(BarrelRoll, "BarrelRoll", "Barrel Roll", "R6", 4)
 		PlayAnim(BarrelRoll, "136801964", .1, 1, "PriorLow", true)
-		local MegaInsane = Instance.new("TextButton")
+		local MegaInsane = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(MegaInsane, "MegaInsane", "Mega Insane", "R6", 4)
 		PlayAnim(MegaInsane, "184574340", .1, 40, "PriorLow", true)
-		local WeirdMove = Instance.new("TextButton")
+		local WeirdMove = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(WeirdMove, "WeirdMove", "Weird Move", "R6", 4)
 		PlayAnim(WeirdMove, "215384594", .1, 1, "PriorLow", true)
-		local CloneIllusion = Instance.new("TextButton")
+		local CloneIllusion = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(CloneIllusion, "CloneIllusion", "Clone Illusion", "R6", 4)
 		PlayAnim(CloneIllusion, "215384594", .1, 1e10, "PriorLow", true)
-		local Insane = Instance.new("TextButton")
+		local Insane = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Insane, "Insane", "Insane", "R6", 4)
 		PlayAnim(Insane, "33796059", .1, 1e8, "PriorLow", true)
-		local FullSwing = Instance.new("TextButton")
+		local FullSwing = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FullSwing, "FullSwing", "Full Swing", "R6", 5)
 		PlayAnim(FullSwing, "218504594", .1, 1, "PriorHigh", false)
-		local NunchakSlash = Instance.new("TextButton")
+		local NunchakSlash = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(NunchakSlash, "NunchakSlash", "Nunchak Slash", "R6", 5)
 		PlayAnim(NunchakSlash, "204292303", .1, 1.5, "PriorLow", false)
-		local FullPunch = Instance.new("TextButton")
+		local FullPunch = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FullPunch, "FullPunch", "Full Punch", "R6", 5)
 		PlayAnim(FullPunch, "204062532", .1, 1.5, "PriorLow", false)
-		local SwordSpin = Instance.new("TextButton")
+		local SwordSpin = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(SwordSpin, "SwordSpin", "Sword Spin", "R6", 5)
 		PlayAnim(SwordSpin, "186934910", .1, 0.8, "PriorLow", false)
-		local Punches = Instance.new("TextButton")
+		local Punches = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Punches, "Punches", "Punches", "R6", 5)
 		PlayAnim(Punches, "126753849", .1, 2, "PriorLow", false)
-		local HeroJump = Instance.new("TextButton")
+		local HeroJump = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(HeroJump, "HeroJump", "Hero Jump", "R6", 5)
 		PlayAnim(HeroJump, "184574340", .1, 1, "PriorLow", false)
-		local DoubleSlash = Instance.new("TextButton")
+		local DoubleSlash = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(DoubleSlash, "DoubleSlash", "Double Slash", "R6", 5)
 		PlayAnim(DoubleSlash, "35978879", .1, 2, "PriorLow", false)
-		local SwordSwing = Instance.new("TextButton")
+		local SwordSwing = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(SwordSwing, "SwordSwing", "Sword Swing", "R6", 5)
 		PlayAnim(SwordSwing, "32659699", .1, 1, "PriorLow", false)
 	end
 
 	--R15 Emotes
 	local function R15Anims()
-		local Dance1 = Instance.new("TextButton")
+		local Dance1 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Dance1, "Dance1", "Dance 1", "R15", 1)
 		PlayAnim(Dance1, "507771955", .1, 1, "PriorLow", true)
-		local Dance2 = Instance.new("TextButton")
+		local Dance2 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Dance2, "Dance2", "Dance 2", "R15", 1)
 		PlayAnim(Dance2, "507776720", .1, 1, "PriorLow", true)
-		local Dance3 = Instance.new("TextButton")
+		local Dance3 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Dance3, "Dance3", "Dance 3", "R15", 1)
 		PlayAnim(Dance3, "507777451", .1, 1, "PriorLow", true)
-		local FlossDance = Instance.new("TextButton")
+		local FlossDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FlossDance, "FlossDance", "Floss Dance", "R15", 1)
 		PlayAnim(FlossDance, "10714340543", .1, 1, "PriorLow", true)
-		local Monkey = Instance.new("TextButton")
+		local Monkey = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Monkey, "Monkey", "Monkey", "R15", 1)
 		PlayAnim(Monkey, "10714388352", .1, 1, "PriorLow", true)
-		local IWantMoneyDance = Instance.new("TextButton")
+		local IWantMoneyDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(IWantMoneyDance, "IWantMoneyDance", "IWantMoney Dance", "R15", 1)
 		PlayAnim(IWantMoneyDance, "115781688996859", .1, 1, "PriorLow", true)
-		local FortniteDance = Instance.new("TextButton")
+		local FortniteDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FortniteDance, "FortniteDance", "Fortnite Dance", "R15", 1)
 		PlayAnim(FortniteDance, "88455578674030", .1, 1, "PriorLow", true)
-		local GangnamStyle = Instance.new("TextButton")
+		local GangnamStyle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(GangnamStyle, "GangnamStyle", "Gangnam Style", "R15", 1)
 		PlayAnim(GangnamStyle, "129764254213842", .1, 0.9, "PriorLow", true)
-		local RussianKick = Instance.new("TextButton")
+		local RussianKick = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(RussianKick, "RussianKick", "Russian Kick", "R15", 1)
 		PlayAnim(RussianKick, "70653974473742", .1, 1, "PriorLow", true)
-		local MannrobicsDance = Instance.new("TextButton")
+		local MannrobicsDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(MannrobicsDance, "MannrobicsDance", "Mannrobics Dance", "R15", 1)
 		PlayAnim(MannrobicsDance, "73932117454031", .1, 1, "PriorLow", true)
-		local PennywiseDance = Instance.new("TextButton")
+		local PennywiseDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(PennywiseDance, "PennywiseDance", "Pennywise Dance", "R15", 1)
 		PlayAnim(PennywiseDance, "138755180984581", .1, 1, "PriorLow", true)
-		local BreakDance = Instance.new("TextButton")
+		local BreakDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(BreakDance, "BreakDance", "Break Dance", "R15", 1)
 		PlayAnim(BreakDance, "10214311282", .1, 1, "PriorLow", true)
-		local Rambunctious = Instance.new("TextButton")
+		local Rambunctious = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Rambunctious, "Rambunctious", "Rambunctious", "R15", 1)
 		PlayAnim(Rambunctious, "129991743366120", .1, 1, "PriorLow", true)
-		local NightmailDance = Instance.new("TextButton")
+		local NightmailDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(NightmailDance, "NightmailDance", "Nightmail Dance", "R15", 1)
 		PlayAnim(NightmailDance, "103655955630769", .1, 1, "PriorLow", true)
-		local TennaArmDance = Instance.new("TextButton")
+		local TennaArmDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(TennaArmDance, "TennaArmDance", "Tenna Arm Dance", "R15", 1)
 		PlayAnim(TennaArmDance, "140315159513795", .1, 1.1, "PriorLow", true)
-		local TennaSwingDance = Instance.new("TextButton")
+		local TennaSwingDance = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(TennaSwingDance, "TennaSwingDance", "Tenna Swing Dance", "R15", 1)
 		PlayAnim(TennaSwingDance, "77984841414450", .1, 1, "PriorLow", true)
-		local TakeTheL = Instance.new("TextButton")
+		local TakeTheL = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(TakeTheL, "TakeTheL", "Take The L", "R15", 1)
 		PlayAnim(TakeTheL, "78870781032132", .1, 1, "PriorLow", true)
-		local JumpJacks = Instance.new("TextButton")
+		local JumpJacks = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(JumpJacks, "JumpJacks", "Jump Jacks", "R15", 1)
 		PlayAnim(JumpJacks, "10714375667", .1, 1, "PriorLow", true)
 
-		local Wave = Instance.new("TextButton")
+		local Wave = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Wave, "Wave", "Wave", "R15", 2)
 		PlayAnim(Wave, "10714359093", .1, 1, "PriorLow", false)
-		local HighWave = Instance.new("TextButton")
+		local HighWave = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(HighWave, "HighWave", "HighWave", "R15", 2)
 		PlayAnim(HighWave, "10714362852", .1, 1, "PriorLow", false)
-		local AwkwardWave = Instance.new("TextButton")
+		local AwkwardWave = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(AwkwardWave, "AwkwardWave", "Awkward Wave", "R15", 2)
 		PlayAnim(AwkwardWave, "86074172929360", .1, 1, "PriorLow", true)
-		local Point = Instance.new("TextButton")
+		local Point = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Point, "Point", "Point", "R15", 2)
 		PlayAnim(Point, "10714395441", .1, 1, "PriorLow", false)
-		local Beckon = Instance.new("TextButton")
+		local Beckon = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Beckon, "Beckon", "Beckon", "R15", 2)
 		PlayAnim(Beckon, "10713984554", .1, 1, "PriorLow", false)
-		local Happy = Instance.new("TextButton")
+		local Happy = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Happy, "Happy", "Happy", "R15", 2)
 		PlayAnim(Happy, "10714352626", .1, 1, "PriorLow", false)
-		local Cheer = Instance.new("TextButton")
+		local Cheer = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Cheer, "Cheer", "Cheer", "R15", 2)
 		PlayAnim(Cheer, "507770677", .1, 1, "PriorLow", false)
-		local Celebrate = Instance.new("TextButton")
+		local Celebrate = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Celebrate, "Celebrate", "Celebrate", "R15", 2)
 		PlayAnim(Celebrate, "10714016223", .1, 1, "PriorLow", false)
-		local Salute = Instance.new("TextButton")
+		local Salute = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Salute, "Salute", "Salute", "R15", 2)
 		PlayAnim(Salute, "10714389988", .1, 1, "PriorLow", false)
-		local Shrug = Instance.new("TextButton")
+		local Shrug = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Shrug, "Shrug", "Shrug", "R15", 2)
 		PlayAnim(Shrug, "10714374484", .1, 1, "PriorLow", false)
-		local Thinking = Instance.new("TextButton")
+		local Thinking = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Thinking, "Thinking", "Thinking", "R15", 2)
 		PlayAnim(Thinking, "123167401858016", .1, 1, "PriorLow", false)
-		local Confused = Instance.new("TextButton")
+		local Confused = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Confused, "Confused", "Confused", "R15", 2)
 		PlayAnim(Confused, "4940561610", .1, 1, "PriorLow", false)
-		local Agree = Instance.new("TextButton")
+		local Agree = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Agree, "Agree", "Agree", "R15", 2)
 		PlayAnim(Agree, "10713954623", .1, 1, "PriorLow", false)
-		local Disagree = Instance.new("TextButton")
+		local Disagree = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Disagree, "Disagree", "Disagree", "R15", 2)
 		PlayAnim(Disagree, "10714065135", .1, 1, "PriorLow", false)
-		local DolphinBang = Instance.new("TextButton")
+		local DolphinBang = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(DolphinBang, "DolphinBang", "Dolphin Bang", "R15", 2)
 		PlayAnim(DolphinBang, "10714068222", .1, 1, "PriorLow", false)
-		local Twirl = Instance.new("TextButton")
+		local Twirl = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Twirl, "Twirl", "Twirl", "R15", 2)
 		PlayAnim(Twirl, "10714293450", .1, 1, "PriorLow", false)
-		local HeroLanding = Instance.new("TextButton")
+		local HeroLanding = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(HeroLanding, "HeroLanding", "Hero Landing", "R15", 2)
 		PlayAnim(HeroLanding, "10714360164", .1, 1, "PriorLow", false)
-		local Shy = Instance.new("TextButton")
+		local Shy = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Shy, "Shy", "Shy", "R15", 2)
 		PlayAnim(Shy, "10714369325", .1, 1, "PriorLow", false)
-		local Coward = Instance.new("TextButton")
+		local Coward = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Coward, "Coward", "Coward", "R15", 2)
 		PlayAnim(Coward, "4940563117", .1, 1, "PriorLow", false)
-		local Dizzy = Instance.new("TextButton")
+		local Dizzy = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Dizzy, "Dizzy", "Dizzy", "R15", 2)
 		PlayAnim(Dizzy, "10714066964", .1, 1, "PriorLow", false)
-		local PushUp = Instance.new("TextButton")
+		local PushUp = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(PushUp, "PushUp", "Push Ups", "R15", 2)
 		PlayAnim(PushUp, "80326183054599", .1, 1, "PriorLow", true)
-		local Bodybuilder = Instance.new("TextButton")
+		local Bodybuilder = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Bodybuilder, "Bodybuilder", "Bodybuilder", "R15", 2)
 		PlayAnim(Bodybuilder, "10713990381", .1, 1, "PriorLow", true)
-		local Laugh = Instance.new("TextButton")
+		local Laugh = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Laugh, "Laugh", "Laugh", "R15", 2)
 		PlayAnim(Laugh, "507770818", .1, 1, "PriorLow", false)
-		local BigLaugh = Instance.new("TextButton")
+		local BigLaugh = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(BigLaugh, "BigLaugh", "Big Laugh", "R15", 2)
 		PlayAnim(BigLaugh, "98974619620224", .1, 1, "PriorLow", true)
-		local Bored = Instance.new("TextButton")
+		local Bored = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Bored, "Bored", "Bored", "R15", 2)
 		PlayAnim(Bored, "10713992055", .1, 1, "PriorLow", true)
-		local Applaud = Instance.new("TextButton")
+		local Applaud = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Applaud, "Applaud", "Applaud", "R15", 2)
 		PlayAnim(Applaud, "10713966026", .1, 1, "PriorLow", true)
-		local FakeDeath = Instance.new("TextButton")
+		local FakeDeath = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FakeDeath, "FakeDeath", "FakeDeath", "R15", 2)
 		PlayAnim(FakeDeath, "88130117312312", .1, 1, "PriorLowPause", true)
 
-		local Tank = Instance.new("TextButton")
+		local Tank = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Tank, "Tank", "Tank", "R15", 3)
 		PlayAnim(Tank, "115951523870527", .5, 1, "PriorLow", true)
-		local RaceCar = Instance.new("TextButton")
+		local RaceCar = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(RaceCar, "RaceCar", "Race Car", "R15", 3)
 		PlayAnim(RaceCar, "72382226286301", .5, 1, "PriorLow", true)
-		local Helicopter = Instance.new("TextButton")
+		local Helicopter = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Helicopter, "Helicopter", "Helicopter", "R15", 3)
 		PlayAnim(Helicopter, "76510079095692", .5, 1, "PriorLow", true)
-		local CarDriving = Instance.new("TextButton")
+		local CarDriving = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(CarDriving, "CarDriving", "Car Driving", "R15", 3)
 		PlayAnim(CarDriving, "132471972345518", .5, 0.5, "PriorLow", true)
-		local Crawl = Instance.new("TextButton")
+		local Crawl = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Crawl, "Crawl", "Crawl", "R15", 3)
 		PlayAnim(Crawl, "106501741606953", .1, 1, "PriorLow", true)
-		local BigBadWolf = Instance.new("TextButton")
+		local BigBadWolf = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(BigBadWolf, "BigBadWolf", "Big Bad Wolf", "R15", 3)
 		PlayAnim(BigBadWolf, "84490859002106", .1, 1, "PriorLow", true)
-		local Wheel = Instance.new("TextButton")
+		local Wheel = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Wheel, "Wheel", "Wheel", "R15", 3)
 		PlayAnim(Wheel, "116700088132671", .1, 0.65, "PriorLowRunning", true)
-		local DefaultR6Run = Instance.new("TextButton")
+		local DefaultR6Run = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(DefaultR6Run, "DefaultR6Run", "R6 Run", "R15", 3)
 		PlayAnim(DefaultR6Run, "88923549940250", .1, 1, "PriorLowRunning", true)
-		local MiniWalk = Instance.new("TextButton")
+		local MiniWalk = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(MiniWalk, "MiniWalk", "Mini Walk", "R15", 3)
 		PlayAnim(MiniWalk, "85887415033585", .1, 1.3, "PriorLowRunning", true)
-		local MedusaWalk = Instance.new("TextButton")
+		local MedusaWalk = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(MedusaWalk, "MedusaWalk", "Medusa Walk", "R15", 3)
 		PlayAnim(MedusaWalk, "131663132818596", .1, 1.5, "PriorLowRunning", true)
-		local TallWalk = Instance.new("TextButton")
+		local TallWalk = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(TallWalk, "TallWalk", "Tall Walk", "R15", 3)
 		PlayAnim(TallWalk, "134010853417610", .1, 1.5, "PriorLowRunning", true)
-		local ShadowRun = Instance.new("TextButton")
+		local ShadowRun = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(ShadowRun, "ShadowRun", "Shadow Running", "R15", 3)
 		PlayAnim(ShadowRun, "82598234841035", .1, 0.8, "PriorLowRunning", true)
-		local AdidasRun = Instance.new("TextButton")
+		local AdidasRun = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(AdidasRun, "AdidasRun", "Adidas Running", "R15", 3)
 		PlayAnim(AdidasRun, "18537384940", .1, 1, "PriorLowRunning", true)
-		local HappyRun = Instance.new("TextButton")
+		local HappyRun = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(HappyRun, "HappyRun", "Happy Run", "R15", 3)
 		PlayAnim(HappyRun, "136336776520965", .1, 1, "PriorLowRunning", true)
-		local FloatingRun = Instance.new("TextButton")
+		local FloatingRun = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FloatingRun, "FloatingRun", "Floating Run", "R15", 3)
 		PlayAnim(FloatingRun, "98995968630900", .1, 1, "PriorLowRunning", true)
-		local MotionRun = Instance.new("TextButton")
+		local MotionRun = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(MotionRun, "MotionRun", "Motion Run", "R15", 3)
 		PlayAnim(MotionRun, "101925097435036", .1, 1, "PriorLowRunning", true)
 
-		local HappyIdle = Instance.new("TextButton")
+		local HappyIdle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(HappyIdle, "HappyIdle", "Happy Idle", "R15", 4)
 		PlayAnim(HappyIdle, "88212525150688", .1, 1, "PriorLowIdle", true)
-		local MiniIdle = Instance.new("TextButton")
+		local MiniIdle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(MiniIdle, "MiniIdle", "Mini Idle", "R15", 4)
 		PlayAnim(MiniIdle, "82127055873357", .1, 1, "PriorLowIdle", true)
-		local VibeIdle = Instance.new("TextButton")
+		local VibeIdle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(VibeIdle, "VibeIdle", "Vibe Idle", "R15", 4)
 		PlayAnim(VibeIdle, "99638411514722", .1, 1, "PriorLowIdle", true)
-		local TallIdle = Instance.new("TextButton")
+		local TallIdle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(TallIdle, "TallIdle", "Tall Idle", "R15", 4)
 		PlayAnim(TallIdle, "73645108622491", .1, 1, "PriorLowIdle", true)
-		local WheelIdle = Instance.new("TextButton")
+		local WheelIdle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(WheelIdle, "WheelIdle", "Wheel Idle", "R15", 4)
 		PlayAnim(WheelIdle, "116700088132671", .1, 0, "PriorLowIdle", true)
-		local FloatingHeadSitting = Instance.new("TextButton")
+		local FloatingHeadSitting = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FloatingHeadSitting, "FloatingHeadSitting", "Floating Head Sit", "R15", 4)
 		PlayAnim(FloatingHeadSitting, "111681053387222", .1, 1, "PriorLow", true)
-		local FloatChillSit = Instance.new("TextButton")
+		local FloatChillSit = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FloatChillSit, "FloatChillSit", "Float Chill Sit", "R15", 4)
 		PlayAnim(FloatChillSit, "110211186840347", .1, 0.5, "PriorLow", true)
-		local FloatIdle = Instance.new("TextButton")
+		local FloatIdle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FloatIdle, "FloatIdle", "Float Idle", "R15", 4)
 		PlayAnim(FloatIdle, "90055248227279", .1, 1, "PriorLowIdle", true)
-		local DefaultR6Idle = Instance.new("TextButton")
+		local DefaultR6Idle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(DefaultR6Idle, "DefaultR6Idle", "R6 Idle", "R15", 4)
 		PlayAnim(DefaultR6Idle, "130392105157572", .1, 1, "PriorLowIdle", true)
-		local TPose = Instance.new("TextButton")
+		local TPose = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(TPose, "TPose", "T Pose", "R15", 4)
 		PlayAnim(TPose, "121655148084031", .1, 1, "PriorLow", true)
-		local CrouchR15 = Instance.new("TextButton")
+		local CrouchR15 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(CrouchR15, "CrouchR15", "Crouch", "R15", 4)
 		PlayAnim(CrouchR15, "97517127273301", .3, 1, "PriorLow", true)
-		local Sitting = Instance.new("TextButton")
+		local Sitting = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Sitting, "Sitting", "Sitting", "R15", 4)
 		PlayAnim(Sitting, "94763556845023", .1, 1, "PriorLow", true)
-		local MM2Sit = Instance.new("TextButton")
+		local MM2Sit = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(MM2Sit, "MM2Sit", "MM2 Sit", "R15", 4)
 		PlayAnim(MM2Sit, "130577643309726", .1, 1, "PriorLow", true)
-		local Box = Instance.new("TextButton")
+		local Box = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Box, "Box", "Box", "R15", 4)
 		PlayAnim(Box, "73753845465382", .1, 1, "PriorLow", true)
-		local Sleeping = Instance.new("TextButton")
+		local Sleeping = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Sleeping, "Sleeping", "Sleeping", "R15", 4)
 		PlayAnim(Sleeping, "121641415206650", .5, 1, "PriorLow", true)
-		local HeadJuggle = Instance.new("TextButton")
+		local HeadJuggle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(HeadJuggle, "HeadJuggle", "Head Juggle", "R15", 4)
 		PlayAnim(HeadJuggle, "136767849845319", .1, 1, "PriorLow", true)
-		local FloatingOnClouds = Instance.new("TextButton")
+		local FloatingOnClouds = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FloatingOnClouds, "FloatingOnClouds", "Floating On Clouds", "R15", 4)
 		PlayAnim(FloatingOnClouds, "77840765435893", .1, 1, "PriorLow", true)
-		local SitAnim = Instance.new("TextButton")
+		local SitAnim = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(SitAnim, "SitAnim", "Sit Anim", "R15", 4)
 		PlayAnim(SitAnim, "507768133", .1, 1, "PriorLow", true)
-		local ToolHandle = Instance.new("TextButton")
+		local ToolHandle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(ToolHandle, "ToolHandle", "Tool Handle", "R15", 4)
 		PlayAnim(ToolHandle, "507768375", .1, 1, "PriorHigh", true)
-		local FightingIdle = Instance.new("TextButton")
+		local FightingIdle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FightingIdle, "FightingIdle", "Fighting Idle", "R15", 4)
 		PlayAnim(FightingIdle, "105947156749343", .1, 1, "PriorLowIdle", true)
 
-		local JumpingSpider = Instance.new("TextButton")
+		local JumpingSpider = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(JumpingSpider, "JumpingSpider", "Jumping Spider", "R15", 5)
 		PlayAnim(JumpingSpider, "139310328821985", .1, 1, "PriorLow", true)
-		local InsaneDog = Instance.new("TextButton")
+		local InsaneDog = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(InsaneDog, "InsaneDog", "Insane Dog", "R15", 5)
 		PlayAnim(InsaneDog, "96435804447949", .1, 1, "PriorLow", true)
-		local WormAnim = Instance.new("TextButton")
+		local WormAnim = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(WormAnim, "WormAnim", "Worm Fly", "R15", 5)
 		PlayAnim(WormAnim, "135990691658209", .3, 1, "PriorLow", true)
-		local Orbit = Instance.new("TextButton")
+		local Orbit = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Orbit, "Orbit", "Orbit", "R15", 5)
 		PlayAnim(Orbit, "108359356964182", .5, 1, "PriorLow", true)
-		local Hanging = Instance.new("TextButton")
+		local Hanging = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Hanging, "Hanging", "Hanging", "R15", 5)
 		PlayAnim(Hanging, "125662782523118", .1, 1, "PriorLow", true)
-		local LaggyWalkTroll = Instance.new("TextButton")
+		local LaggyWalkTroll = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(LaggyWalkTroll, "LaggyWalkTroll", "Laggy Walk Troll", "R15", 5)
 		PlayAnim(LaggyWalkTroll, "119199812452698", .1, 1, "PriorLow", true)
-		local InchWorm = Instance.new("TextButton")
+		local InchWorm = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(InchWorm, "InchWorm", "Inch Worm", "R15", 5)
 		PlayAnim(InchWorm, "119096405600200", .1, 1, "PriorLow", true)
-		local GoofyWiggle = Instance.new("TextButton")
+		local GoofyWiggle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(GoofyWiggle, "GoofyWiggle", "Goofy Wiggle", "R15", 5)
 		PlayAnim(GoofyWiggle, "74917195706355", .1, 1, "PriorLow", true)
-		local Tornado = Instance.new("TextButton")
+		local Tornado = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Tornado, "Tornado", "Tornado", "R15", 5)
 		PlayAnim(Tornado, "135373056067761", .1, 1, "PriorLow", true)
-		local AdminFly = Instance.new("TextButton")
+		local AdminFly = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(AdminFly, "AdminFly", "Admin Fly", "R15", 5)
 		PlayAnim(AdminFly, "85063861261432", .1, 1, "PriorLow", true)
-		local ObbyHead = Instance.new("TextButton")
+		local ObbyHead = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(ObbyHead, "ObbyHead", "Little Obbyist", "R15", 5)
 		PlayAnim(ObbyHead, "115569573258316", .1, 1, "PriorLow", true)
-		local Insane = Instance.new("TextButton")
+		local Insane = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Insane, "Insane", "Insane", "R15", 5)
 		PlayAnim(Insane, "93087898023268", .1, 1, "PriorLow", true)
-		local GoofyFLY = Instance.new("TextButton")
+		local GoofyFLY = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(GoofyFLY, "GoofyFLY", "Goofy FLY", "R15", 5)
 		PlayAnim(GoofyFLY, "118417760427139", .1, 1, "PriorLow", true)
-		local BodyPhone = Instance.new("TextButton")
+		local BodyPhone = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(BodyPhone, "BodyPhone", "Body Phone", "R15", 5)
 		PlayAnim(BodyPhone, "73390669780316", .1, 0.8, "PriorLow", false)
-		local Spin = Instance.new("TextButton")
+		local Spin = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Spin, "Spin", "Spin", "R15", 5)
 		PlayAnim(Spin, "110792133024438", .1, 1, "PriorHigh", true)
-		local HyperSpin = Instance.new("TextButton")
+		local HyperSpin = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(HyperSpin, "HyperSpin", "Hyper Spin", "R15", 5)
 		PlayAnim(HyperSpin, "125165371323590", .1, 1, "PriorLow", true)
-		local SpinAround = Instance.new("TextButton")
+		local SpinAround = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(SpinAround, "SpinAround", "SpinAround", "R15", 5)
 		PlayAnim(SpinAround, "91004858616595", .1, 1, "PriorLow", true)
-		local FloatingSpace = Instance.new("TextButton")
+		local FloatingSpace = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FloatingSpace, "FloatingSpace", "Floating Space", "R15", 5)
 		PlayAnim(FloatingSpace, "71209604118044", .1, 1, "PriorLow", true)
-		local FloatingSpace2 = Instance.new("TextButton")
+		local FloatingSpace2 = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(FloatingSpace2, "FloatingSpace2", "Floating Space 2", "R15", 5)
 		PlayAnim(FloatingSpace2, "70394064781064", .1, 0.5, "PriorLow", true)
 
-		local DaHoodStomp = Instance.new("TextButton")
+		local DaHoodStomp = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(DaHoodStomp, "DaHoodStomp", "DaHood Stomp", "R15", 6)
 		PlayAnim(DaHoodStomp, "92249489340640", .1, 1, "PriorLow", false)
-		local QuadPunch = Instance.new("TextButton")
+		local QuadPunch = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(QuadPunch, "QuadPunch", "Quad Punch", "R15", 6)
 		PlayAnim(QuadPunch, "139643944264511", .1, 1, "PriorLow", false)
-		local TennaKick = Instance.new("TextButton")
+		local TennaKick = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(TennaKick, "TennaKick", "TennaKick", "R15", 6)
 		PlayAnim(TennaKick, "118139885865308", .1, 1, "PriorLow", false)
-		local Dropkick = Instance.new("TextButton")
+		local Dropkick = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		CreateAnimButton(Dropkick, "Dropkick", "Dropkick", "R15", 6)
 		PlayAnim(Dropkick, "133566007754001", .1, 1, "PriorLow", false)
 	end
@@ -4406,7 +5033,7 @@ local function CreateGui()
 				if categoryName == "CustomEmotes" and #data["CustomEmotes"] ~= 0 then
 					if DebugInfoEnabled then print("[AdditionalAnims File]: Extracting Animations") end
 					for _, info in ipairs(animationsList) do
-						local danceButton = Instance.new("TextButton")
+						local danceButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 						CreateAnimButton(danceButton, info[1], info[2], info[3], info[4])
 						PlayAnim(danceButton, info[5], info[6], info[7], info[8], info[9])
 					end
@@ -4444,7 +5071,7 @@ local function CreateGui()
 					if DebugInfoEnabled then print("[CustomAnims File]: Extracting Animations") end
 					CAOutput = CAOutput.."CustomEmotes\n"
 					for _, info in ipairs(animationsList) do
-						local danceButton = Instance.new("TextButton")
+						local danceButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 						CreateAnimButton(danceButton, info[1], info[2], info[3], info[4])
 						PlayAnim(danceButton, info[5], info[6], info[7], info[8], info[9])
 					end
@@ -4530,7 +5157,7 @@ local function CreateGui()
 					if DebugInfoEnabled then print("[SpecGameAnims Github]: Extracting Animations") end
 					GSGAOutput = GSGAOutput.."CustomEmotes\n"
 					for _, info in ipairs(animationsList) do
-						local danceButton = Instance.new("TextButton")
+						local danceButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 						CreateAnimButton(danceButton, info[1], info[2], info[3], info[4])
 						PlayAnim(danceButton, info[5], info[6], info[7], info[8], info[9])
 					end
@@ -4637,7 +5264,7 @@ local function CreateGui()
 					if DebugInfoEnabled then print("[SpecGameAnims File]: Extracting Animations") end
 					LSGAOutput = LSGAOutput.."CustomEmotes\n"
 					for _, info in ipairs(animationsList) do
-						local danceButton = Instance.new("TextButton")
+						local danceButton = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 						CreateAnimButton(danceButton, info[1], info[2], info[3], info[4])
 						PlayAnim(danceButton, info[5], info[6], info[7], info[8], info[9])
 					end
@@ -4747,7 +5374,7 @@ local function CreateGui()
 
 	--Emote wheel
 	local function EmoteWheelButton(Button, AnimButtonName, KeyCode, ActionName)
-		local NumLabel = Instance.new("TextLabel")
+		local NumLabel = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 		NumLabel.Parent = Button
 		NumLabel.Size = UDim2.new(1, 0, 1, 0)
 		NumLabel.BackgroundTransparency = 1
@@ -4789,7 +5416,7 @@ local function CreateGui()
 		end)
 
 		AnimButton.Changed:Connect(function()
-			if AnimButton.BackgroundColor3 == ButtonSelectCol then
+			if __SIEXTHER_VIP_GLASS_V1.Read(AnimButton, "BackgroundColor3") == ButtonSelectCol then
 				Button.BackgroundColor3 = ButtonSelectCol
 				AnimActive = true
 			else
@@ -4841,7 +5468,7 @@ local function CreateGui()
 
 	for _, UiPart in ipairs(Emoter:GetDescendants()) do
 		if table.find(UiCornerParts, UiPart.Name) and UICornerEnabled then
-			local UICorner = Instance.new("UICorner")
+			local UICorner = __SIEXTHER_VIP_GLASS_V1.Instance.new("UICorner")
 			UICorner.Parent = UiPart
 			UICorner.CornerRadius = UDim.new(0, 5)
 			if UiPart.Name == "GuiTopFrame" then
@@ -4857,7 +5484,7 @@ local function CreateGui()
 		end
 
 		if table.find(UiStrokeParts, UiPart.Name) or table.find(UiStroke1Parts, UiPart.Name) then
-			local UIStroke = Instance.new("UIStroke")
+			local UIStroke = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIStroke")
 			UIStroke.Parent = UiPart
 			UIStroke.Thickness = 1
 			UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
@@ -4867,7 +5494,7 @@ local function CreateGui()
 		end
 
 		if table.find(UiGradientParts, UiPart.Name) and UIGradientEnabled then
-			local UIGradient = Instance.new("UIGradient")
+			local UIGradient = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIGradient")
 			UIGradient.Parent = UiPart
 			UIGradient.Color = ColorSequence.new(Color3.fromRGB(207, 207, 207), Color3.fromRGB(255, 255, 255))
 			UIGradient.Rotation = -90
@@ -4877,7 +5504,7 @@ local function CreateGui()
 	local function AddUiPadding(Part, left, right, top, bottom)
 		for _, UiPart in ipairs(Emoter:GetDescendants()) do
 			if UiPart.Name == Part then
-				local UIPadding = Instance.new("UIPadding")
+				local UIPadding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 				UIPadding.PaddingLeft = UDim.new(0, left)
 				UIPadding.PaddingRight = UDim.new(0, right)
 				UIPadding.PaddingTop = UDim.new(0, top)
@@ -4998,11 +5625,11 @@ local function CreateGui()
 	-- connections, but replaces the visible legacy interface.
 	-- ============================================================
 	do
-		local BG = Color3.fromRGB(25, 25, 35)
-		local BLUE = Color3.fromRGB(70, 130, 255)
-		local CARD = Color3.fromRGB(32, 32, 44)
+		local BG = __SIEXTHER_VIP_GLASS_V1.bgColor
+		local BLUE = __SIEXTHER_VIP_GLASS_V1.primaryColor
+		local CARD = __SIEXTHER_VIP_GLASS_V1.buttonColor
 		local CARD_HOVER = Color3.fromRGB(40, 44, 60)
-		local TEXT = Color3.fromRGB(238, 241, 255)
+		local TEXT = __SIEXTHER_VIP_GLASS_V1.textColor
 		local SUBTEXT = Color3.fromRGB(150, 158, 185)
 
 		-- Keep all legacy objects alive because the original emote logic
@@ -5021,7 +5648,7 @@ local function CreateGui()
 		MainFrame.Size = UDim2.fromOffset(300, 350)
 		MainFrame.Position = UDim2.new(0.5, -150, 0.5, -175)
 
-		local Modern = Instance.new("Frame")
+		local Modern = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 		Modern.Name = "ModernEmoteList"
 		Modern.Parent = MainFrame
 		Modern.Visible = true
@@ -5030,23 +5657,23 @@ local function CreateGui()
 		Modern.BorderSizePixel = 0
 		Modern.ClipsDescendants = true
 
-		local modernCorner = Instance.new("UICorner")
+		local modernCorner = __SIEXTHER_VIP_GLASS_V1.Instance.new("UICorner")
 		modernCorner.CornerRadius = UDim.new(0, 14)
 		modernCorner.Parent = Modern
 
-		local modernStroke = Instance.new("UIStroke")
+		local modernStroke = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIStroke")
 		modernStroke.Color = BLUE
 		modernStroke.Thickness = 1.5
 		modernStroke.Transparency = 0.05
 		modernStroke.Parent = Modern
 
-		local Header = Instance.new("Frame")
+		local Header = __SIEXTHER_VIP_GLASS_V1.Instance.new("Frame")
 		Header.Name = "Header"
 		Header.Parent = Modern
 		Header.Size = UDim2.new(1, 0, 0, 46)
 		Header.BackgroundTransparency = 1
 
-		local HeaderTitle = Instance.new("TextLabel")
+		local HeaderTitle = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 		HeaderTitle.Parent = Header
 		HeaderTitle.BackgroundTransparency = 1
 		HeaderTitle.Position = UDim2.fromOffset(14, 5)
@@ -5057,7 +5684,7 @@ local function CreateGui()
 		HeaderTitle.TextSize = 15
 		HeaderTitle.TextXAlignment = Enum.TextXAlignment.Left
 
-		local RigLabel = Instance.new("TextLabel")
+		local RigLabel = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextLabel")
 		RigLabel.Parent = Header
 		RigLabel.BackgroundTransparency = 1
 		RigLabel.BorderSizePixel = 0
@@ -5070,7 +5697,7 @@ local function CreateGui()
 		RigLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 		local function headerButton(textValue, xOffset)
-			local b = Instance.new("TextButton")
+			local b = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 			b.Parent = Header
 			b.AnchorPoint = Vector2.new(1, 0.5)
 			b.Position = UDim2.new(1, xOffset, 0.5, 0)
@@ -5082,7 +5709,7 @@ local function CreateGui()
 			b.Text = textValue
 			b.TextColor3 = TEXT
 			b.TextSize = 15
-			local c = Instance.new("UICorner")
+			local c = __SIEXTHER_VIP_GLASS_V1.Instance.new("UICorner")
 			c.CornerRadius = UDim.new(0, 9)
 			c.Parent = b
 			b.MouseEnter:Connect(function() b.BackgroundColor3 = CARD_HOVER end)
@@ -5096,7 +5723,7 @@ local function CreateGui()
 
 
 		-- Minimal search bar
-		local SearchBox = Instance.new("TextBox")
+		local SearchBox = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextBox")
 		SearchBox.Name = "SearchBox"
 		SearchBox.Parent = Modern
 		SearchBox.Position = UDim2.fromOffset(10, 51)
@@ -5113,12 +5740,12 @@ local function CreateGui()
 		SearchBox.TextSize = 12
 		SearchBox.TextXAlignment = Enum.TextXAlignment.Left
 
-		local searchCorner = Instance.new("UICorner")
+		local searchCorner = __SIEXTHER_VIP_GLASS_V1.Instance.new("UICorner")
 		searchCorner.CornerRadius = UDim.new(0, 9)
 		searchCorner.Parent = SearchBox
 
 
-		local searchPadding = Instance.new("UIPadding")
+		local searchPadding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 		searchPadding.PaddingLeft = UDim.new(0, 10)
 		searchPadding.PaddingRight = UDim.new(0, 10)
 		searchPadding.Parent = SearchBox
@@ -5169,14 +5796,14 @@ local function CreateGui()
 			end
 		end
 
-		local ListLayout = Instance.new("UIListLayout")
+		local ListLayout = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIListLayout")
 		ListLayout.Parent = ActiveList
 		ListLayout.FillDirection = Enum.FillDirection.Vertical
 		ListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 		ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 		ListLayout.Padding = UDim.new(0, 7)
 
-		local ListPadding = Instance.new("UIPadding")
+		local ListPadding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 		ListPadding.Parent = ActiveList
 		ListPadding.PaddingTop = UDim.new(0, 2)
 		ListPadding.PaddingBottom = UDim.new(0, 8)
@@ -5188,10 +5815,10 @@ local function CreateGui()
 			-- Original animation logic changes BackgroundColor3/UIStroke colors
 			-- for selected/running/idle states. Normalize those states to blue.
 			obj:GetPropertyChangedSignal("BackgroundColor3"):Connect(function()
-				if obj.BackgroundColor3 == ButtonSelectCol then
+				if __SIEXTHER_VIP_GLASS_V1.Read(obj, "BackgroundColor3") == ButtonSelectCol then
 					obj.BackgroundColor3 = BLUE
 					obj.BackgroundTransparency = 0.18
-				elseif obj.BackgroundColor3 == ButtonCol then
+				elseif __SIEXTHER_VIP_GLASS_V1.Read(obj, "BackgroundColor3") == ButtonCol then
 					obj.BackgroundColor3 = CARD
 					obj.BackgroundTransparency = 0
 				end
@@ -5209,17 +5836,17 @@ local function CreateGui()
 
 			local padding = obj:FindFirstChildOfClass("UIPadding")
 			if not padding then
-				padding = Instance.new("UIPadding")
+				padding = __SIEXTHER_VIP_GLASS_V1.Instance.new("UIPadding")
 				padding.Parent = obj
 			end
 			padding.PaddingLeft = UDim.new(0, 13)
 			padding.PaddingRight = UDim.new(0, 10)
 
-			local corner = obj:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
+			local corner = obj:FindFirstChildOfClass("UICorner") or __SIEXTHER_VIP_GLASS_V1.Instance.new("UICorner")
 			corner.Parent = obj
 			corner.CornerRadius = UDim.new(0, 9)
 
-			local stroke = obj:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
+			local stroke = obj:FindFirstChildOfClass("UIStroke") or __SIEXTHER_VIP_GLASS_V1.Instance.new("UIStroke")
 			stroke.Parent = obj
 			stroke.Color = BLUE
 			stroke.Thickness = 1
@@ -5227,14 +5854,14 @@ local function CreateGui()
 
 			obj.MouseEnter:Connect(function()
 				stroke.Color = BLUE
-				if obj.BackgroundColor3 == CARD then
+				if __SIEXTHER_VIP_GLASS_V1.Read(obj, "BackgroundColor3") == CARD then
 					obj.BackgroundColor3 = CARD_HOVER
 				end
 				stroke.Transparency = 0.15
 			end)
 			obj.MouseLeave:Connect(function()
 				stroke.Color = BLUE
-				if obj.BackgroundColor3 == CARD_HOVER then
+				if __SIEXTHER_VIP_GLASS_V1.Read(obj, "BackgroundColor3") == CARD_HOVER then
 					obj.BackgroundColor3 = CARD
 				end
 				if stroke.Thickness <= 1 then
@@ -5269,7 +5896,7 @@ local function CreateGui()
 		ApplySearch()
 
 		-- Floating flower shown while minimized.
-		local Floating = Instance.new("TextButton")
+		local Floating = __SIEXTHER_VIP_GLASS_V1.Instance.new("TextButton")
 		Floating.Name = "FloatingFlower"
 		Floating.Parent = Emoter
 		Floating.Visible = false
@@ -5284,7 +5911,7 @@ local function CreateGui()
 		
 	
 
-		local floatCorner = Instance.new("UICorner")
+		local floatCorner = __SIEXTHER_VIP_GLASS_V1.Instance.new("UICorner")
 		floatCorner.CornerRadius = UDim.new(0, 12)
 		floatCorner.Parent = Floating
 
