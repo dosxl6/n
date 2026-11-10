@@ -1,4 +1,12 @@
-
+-- SIEXTHER EVO | Smaller, icon-free iOS notifications with VIPUNIV glass
+-- Replace the old notification block with this file, or execute it on its own.
+-- Keep the existing __SXLG7 theme above this block if other GUIs use that theme.
+-- The existing Notify({Title = ..., Content = ..., Duration = ...}) API is kept.
+-- No progress bar, camera blur, Lighting effects, or per-frame animation loop.
+-- Native UIBlur is optional/experimental; creating it does not verify rendering.
+-- Unsupported clients retain the layered glass material instead of camera blur.
+-- Example (uncomment to preview):
+-- Notify({Title = "SIEXTHER EVO", Content = "Notifikasi liquid glass aktif.", Duration = 5})
 
 local environment = (type(getgenv) == "function" and getgenv()) or _G
 local Players = game:GetService("Players")
@@ -17,17 +25,16 @@ end
 
 local Config = {
     AppName = "SIEXTHER EVO",
-    Width = 260,
+    Width = 240,
     Margin = 12,
     Top = 5, -- Near the screen's safe top edge, without the Roblox topbar offset.
-    Gap = 6,
-    Radius = 17,
+    Gap = 5,
+    Radius = 15,
     MaxVisible = 3,
     MaxQueued = 40,
     Accent = Color3.fromRGB(70, 130, 255),
     Background = Color3.fromRGB(43, 62, 91),
     BackgroundTransparency = 0.48,
-    Icon = "rbxassetid://130059092117574",
     BodySize = 11,
     Text = Color3.fromRGB(255, 255, 255),
     Secondary = Color3.fromRGB(200, 214, 236),
@@ -152,8 +159,8 @@ end
 
 local function measure(record)
     record.width = bannerWidth()
-    record.bodyHeight = bodyHeight(record.content, math.max(1, record.width - 64))
-    record.height = record.content == "" and 49 or 42 + record.bodyHeight
+    record.bodyHeight = bodyHeight(record.content, math.max(1, record.width - 24))
+    record.height = record.content == "" and 45 or 38 + record.bodyHeight
 end
 
 local function attemptBlur(surface)
@@ -201,7 +208,6 @@ local function finish(record)
     cancelThread(record.timer)
     cancelThread(record.enterTimer)
     cancelThread(record.cleanupTimer)
-    cancelThread(record.iconTimer)
     for _, animation in pairs(record.tweens) do cancelTween(animation) end
     for _, connection in ipairs(record.connections) do connection:Disconnect() end
     if dragging and dragging.record == record then dragging = nil end
@@ -350,45 +356,15 @@ local function createVisual(record)
     }, sheen)
     registerFade(record, sheen, "BackgroundTransparency")
 
-    local icon = make("Frame", {
-        Name = "AppIcon",
-        Position = UDim2.new(0, 10, 0.5, -16),
-        Size = UDim2.fromOffset(32, 32),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        ZIndex = 3,
-    }, surface)
-    local asset = tostring(record.options.Icon or Config.Icon)
-    if asset == "" then asset = Config.Icon end
-    if tonumber(asset) then asset = "rbxassetid://" .. asset end
-    local image = make("ImageLabel", {
-        Name = "CustomIcon",
-        Image = asset,
-        Size = UDim2.fromScale(1, 1),
-        BackgroundTransparency = 1,
-        ScaleType = Enum.ScaleType.Fit,
-        ZIndex = 3,
-    }, icon)
-    registerFade(record, image, "ImageTransparency")
-    local assetId = asset:match("^rbxassetid://(%d+)$")
-    if assetId then
-        record.iconTimer = task.delay(3, function()
-            record.iconTimer = nil
-            if not record.finished and not record.closing and image.Parent and not image.IsLoaded then
-                image.Image = "rbxthumb://type=Asset&id=" .. assetId .. "&w=150&h=150"
-            end
-        end)
-    end
-
     record.app = label(record, "AppName", record.appName, 8, Config.Secondary,
-        Enum.Font.GothamMedium, UDim2.fromOffset(52, 7), UDim2.new(1, -116, 0, 11))
+        Enum.Font.GothamMedium, UDim2.fromOffset(12, 6), UDim2.new(1, -76, 0, 10))
     record.time = label(record, "Time", "sekarang", 8, Config.Secondary,
-        Enum.Font.Gotham, UDim2.new(1, -63, 0, 7), UDim2.fromOffset(51, 11))
+        Enum.Font.Gotham, UDim2.new(1, -63, 0, 6), UDim2.fromOffset(51, 10))
     record.time.TextXAlignment = Enum.TextXAlignment.Right
     record.titleLabel = label(record, "Title", record.title, 12, Config.Text,
-        Enum.Font.GothamBold, UDim2.fromOffset(52, 20), UDim2.new(1, -64, 0, 15))
+        Enum.Font.GothamBold, UDim2.fromOffset(12, 18), UDim2.new(1, -24, 0, 14))
     record.bodyLabel = label(record, "Content", record.content, Config.BodySize, Config.Text,
-        Enum.Font.Gotham, UDim2.fromOffset(52, 38), UDim2.new(1, -64, 0, record.bodyHeight))
+        Enum.Font.Gotham, UDim2.fromOffset(12, 34), UDim2.new(1, -24, 0, record.bodyHeight))
     record.bodyLabel.TextWrapped = true
     record.bodyLabel.TextYAlignment = Enum.TextYAlignment.Top
     record.bodyLabel.Visible = record.content ~= ""
@@ -422,7 +398,7 @@ layoutRecord = function(record)
     measure(record)
     if record.frame then
         record.frame.Size = UDim2.fromOffset(record.width, record.height)
-        record.bodyLabel.Size = UDim2.new(1, -64, 0, record.bodyHeight)
+        record.bodyLabel.Size = UDim2.new(1, -24, 0, record.bodyHeight)
     end
 end
 
@@ -445,7 +421,6 @@ dismiss = function(record, direction)
     if dragging and dragging.record == record then dragging = nil end
     cancelThread(record.timer)
     cancelThread(record.enterTimer)
-    cancelThread(record.iconTimer)
     if not record.frame then
         finish(record)
         pump()
@@ -576,8 +551,7 @@ connect(host:GetPropertyChangedSignal("AbsoluteSize"), function()
         removeFrom(active, record)
         cancelThread(record.timer)
         cancelThread(record.enterTimer)
-        cancelThread(record.iconTimer)
-        record.timer, record.enterTimer, record.iconTimer = nil, nil, nil
+        record.timer, record.enterTimer = nil, nil
         for _, animation in pairs(record.tweens) do cancelTween(animation) end
         for _, connection in ipairs(record.connections) do connection:Disconnect() end
         if record.sound then record.sound:Destroy(); record.sound = nil end
