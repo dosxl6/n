@@ -1,12 +1,4 @@
--- SIEXTHER EVO | iOS-inspired Liquid Glass notifications
--- Replace the old notification block with this file, or execute it on its own.
--- Keep the existing __SXLG7 theme above this block if other GUIs use that theme.
--- The existing Notify({Title = ..., Content = ..., Duration = ...}) API is kept.
--- No progress bar, camera blur, Lighting effects, or per-frame animation loop.
--- Native UIBlur is optional/experimental; creating it does not verify rendering.
--- Unsupported clients retain the layered glass material instead of camera blur.
--- Example (uncomment to preview):
--- Notify({Title = "SIEXTHER EVO", Content = "Notifikasi liquid glass aktif.", Duration = 5})
+
 
 local environment = (type(getgenv) == "function" and getgenv()) or _G
 local Players = game:GetService("Players")
@@ -25,16 +17,20 @@ end
 
 local Config = {
     AppName = "SIEXTHER EVO",
-    Width = 366,
-    Margin = 16,
-    Top = 10, -- Added below Roblox's device-safe top inset.
-    Gap = 10,
-    Radius = 26,
+    Width = 260,
+    Margin = 12,
+    Top = 5, -- Near the screen's safe top edge, without the Roblox topbar offset.
+    Gap = 6,
+    Radius = 17,
     MaxVisible = 3,
     MaxQueued = 40,
     Accent = Color3.fromRGB(70, 130, 255),
-    Text = Color3.fromRGB(24, 30, 41),
-    Secondary = Color3.fromRGB(83, 93, 111),
+    Background = Color3.fromRGB(43, 62, 91),
+    BackgroundTransparency = 0.48,
+    Icon = "rbxassetid://130059092117574",
+    BodySize = 11,
+    Text = Color3.fromRGB(255, 255, 255),
+    Secondary = Color3.fromRGB(200, 214, 236),
     SoundId = "rbxassetid://18723584764",
     Volume = 0.22,
     NativeBlur = true,
@@ -89,14 +85,14 @@ end
 local gui = make("ScreenGui", {
     Name = "SIEXTHER_iOS_Notifications",
     ResetOnSpawn = false,
-    IgnoreGuiInset = false,
+    IgnoreGuiInset = true,
     DisplayOrder = 10000,
     ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 })
 -- Existing global glass wrappers must leave this deliberately styled GUI alone.
 gui:SetAttribute("VIPGlassIgnore", true)
 pcall(function()
-    gui.ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets
+    gui.ScreenInsets = Enum.ScreenInsets.DeviceSafeInsets
     gui.ClipToDeviceSafeArea = true
 end)
 
@@ -149,15 +145,15 @@ end
 local function bodyHeight(text, width)
     if text == "" then return 0 end
     local ok, bounds = pcall(function()
-        return TextService:GetTextSize(text, 13, Enum.Font.Gotham, Vector2.new(width, 10000))
+        return TextService:GetTextSize(text, Config.BodySize, Enum.Font.Gotham, Vector2.new(width, 10000))
     end)
-    return math.clamp(ok and math.ceil(bounds.Y) + 3 or 34, 17, 51)
+    return math.clamp(ok and math.ceil(bounds.Y) + 2 or 28, 14, 42)
 end
 
 local function measure(record)
     record.width = bannerWidth()
-    record.bodyHeight = bodyHeight(record.content, math.max(1, record.width - 90))
-    record.height = record.content == "" and 76 or 63 + record.bodyHeight
+    record.bodyHeight = bodyHeight(record.content, math.max(1, record.width - 64))
+    record.height = record.content == "" and 49 or 42 + record.bodyHeight
 end
 
 local function attemptBlur(surface)
@@ -205,6 +201,7 @@ local function finish(record)
     cancelThread(record.timer)
     cancelThread(record.enterTimer)
     cancelThread(record.cleanupTimer)
+    cancelThread(record.iconTimer)
     for _, animation in pairs(record.tweens) do cancelTween(animation) end
     for _, connection in ipairs(record.connections) do connection:Disconnect() end
     if dragging and dragging.record == record then dragging = nil end
@@ -267,10 +264,10 @@ local function createVisual(record)
     record.scale = make("UIScale", { Scale = 0.9 }, frame)
 
     -- Soft rounded depth, kept behind the glass rather than on its edges.
-    for index, expansion in ipairs({ 10, 6, 2 }) do
+    for index, expansion in ipairs({ 6, 4, 2 }) do
         local shadow = make("Frame", {
             Name = "SoftShadow" .. index,
-            Position = UDim2.fromOffset(-expansion, 5 - expansion),
+            Position = UDim2.fromOffset(-expansion, 3 - expansion),
             Size = UDim2.new(1, expansion * 2, 1, expansion * 2),
             BackgroundColor3 = Color3.fromRGB(10, 19, 39),
             BackgroundTransparency = 0.965 - index * 0.008,
@@ -284,25 +281,22 @@ local function createVisual(record)
     local surface = make("Frame", {
         Name = "LiquidGlass",
         Size = UDim2.fromScale(1, 1),
-        BackgroundColor3 = Color3.fromRGB(228, 236, 249),
-        BackgroundTransparency = 0.16,
+        BackgroundColor3 = Config.Background,
+        BackgroundTransparency = Config.BackgroundTransparency,
         BorderSizePixel = 0,
         ClipsDescendants = true,
         ZIndex = 2,
     }, frame)
     record.surface = surface
     corner(surface, Config.Radius)
+    -- Same panel tint and opacity as the supplied VIPUNIV.lua main window.
     make("UIGradient", {
-        Rotation = 105,
+        Name = "GlassTint",
+        Rotation = 100,
         Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-            ColorSequenceKeypoint.new(0.45, Color3.fromRGB(227, 236, 250)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(242, 246, 255)),
-        }),
-        Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0),
-            NumberSequenceKeypoint.new(0.55, 0.07),
-            NumberSequenceKeypoint.new(1, 0.015),
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(230, 244, 255)),
+            ColorSequenceKeypoint.new(0.42, Color3.fromRGB(148, 185, 233)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(209, 231, 255)),
         }),
     }, surface)
     registerFade(record, surface, "BackgroundTransparency")
@@ -311,16 +305,24 @@ local function createVisual(record)
     local edge = make("UIStroke", {
         Name = "GlassRim",
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-        Color = Color3.fromRGB(255, 255, 255),
+        Color = Config.Accent,
         Thickness = 1,
-        Transparency = 0.34,
+        Transparency = 0.18,
     }, surface)
     make("UIGradient", {
-        Rotation = 90,
+        Name = "GlassEdge",
+        Rotation = 125,
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(133, 184, 255)),
+            ColorSequenceKeypoint.new(0.35, Config.Accent),
+            ColorSequenceKeypoint.new(0.75, Color3.fromRGB(55, 108, 211)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(139, 194, 255)),
+        }),
         Transparency = NumberSequence.new({
             NumberSequenceKeypoint.new(0, 0),
-            NumberSequenceKeypoint.new(0.48, 0.58),
-            NumberSequenceKeypoint.new(1, 0.14),
+            NumberSequenceKeypoint.new(0.38, 0.36),
+            NumberSequenceKeypoint.new(0.72, 0.78),
+            NumberSequenceKeypoint.new(1, 0.12),
         }),
     }, edge)
     registerFade(record, edge, "Transparency")
@@ -328,8 +330,8 @@ local function createVisual(record)
     local sheen = make("Frame", {
         Name = "LiquidReflection",
         Size = UDim2.fromScale(1, 1),
-        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-        BackgroundTransparency = 0.87,
+        BackgroundColor3 = Color3.fromRGB(178, 219, 255),
+        BackgroundTransparency = 0.95,
         BorderSizePixel = 0,
         ZIndex = 2,
     }, surface)
@@ -350,53 +352,43 @@ local function createVisual(record)
 
     local icon = make("Frame", {
         Name = "AppIcon",
-        Position = UDim2.new(0, 16, 0.5, -21),
-        Size = UDim2.fromOffset(42, 42),
-        BackgroundColor3 = Config.Accent,
-        BackgroundTransparency = 0,
+        Position = UDim2.new(0, 10, 0.5, -16),
+        Size = UDim2.fromOffset(32, 32),
+        BackgroundTransparency = 1,
         BorderSizePixel = 0,
         ZIndex = 3,
     }, surface)
-    corner(icon, 13)
-    make("UIGradient", {
-        Rotation = 70,
-        Color = ColorSequence.new(Color3.fromRGB(117, 182, 255), Color3.fromRGB(43, 103, 241)),
+    local asset = tostring(record.options.Icon or Config.Icon)
+    if asset == "" then asset = Config.Icon end
+    if tonumber(asset) then asset = "rbxassetid://" .. asset end
+    local image = make("ImageLabel", {
+        Name = "CustomIcon",
+        Image = asset,
+        Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+        ScaleType = Enum.ScaleType.Fit,
+        ZIndex = 3,
     }, icon)
-    registerFade(record, icon, "BackgroundTransparency")
-    if record.options.Icon and tostring(record.options.Icon) ~= "" then
-        local asset = tostring(record.options.Icon)
-        if tonumber(asset) then asset = "rbxassetid://" .. asset end
-        local image = make("ImageLabel", {
-            Name = "CustomIcon",
-            Image = asset,
-            Size = UDim2.fromScale(1, 1),
-            BackgroundTransparency = 1,
-            ScaleType = Enum.ScaleType.Fit,
-        }, icon)
-        corner(image, 13)
-        registerFade(record, image, "ImageTransparency")
-    else
-        local initials = make("TextLabel", {
-            Name = "SX",
-            Text = "SX",
-            Font = Enum.Font.GothamBold,
-            TextSize = 16,
-            TextColor3 = Color3.new(1, 1, 1),
-            BackgroundTransparency = 1,
-            Size = UDim2.fromScale(1, 1),
-        }, icon)
-        registerFade(record, initials, "TextTransparency")
+    registerFade(record, image, "ImageTransparency")
+    local assetId = asset:match("^rbxassetid://(%d+)$")
+    if assetId then
+        record.iconTimer = task.delay(3, function()
+            record.iconTimer = nil
+            if not record.finished and not record.closing and image.Parent and not image.IsLoaded then
+                image.Image = "rbxthumb://type=Asset&id=" .. assetId .. "&w=150&h=150"
+            end
+        end)
     end
 
-    record.app = label(record, "AppName", record.appName, 10, Config.Secondary,
-        Enum.Font.GothamMedium, UDim2.fromOffset(70, 12), UDim2.new(1, -150, 0, 14))
-    record.time = label(record, "Time", "sekarang", 10, Config.Secondary,
-        Enum.Font.Gotham, UDim2.new(1, -75, 0, 12), UDim2.fromOffset(58, 14))
+    record.app = label(record, "AppName", record.appName, 8, Config.Secondary,
+        Enum.Font.GothamMedium, UDim2.fromOffset(52, 7), UDim2.new(1, -116, 0, 11))
+    record.time = label(record, "Time", "sekarang", 8, Config.Secondary,
+        Enum.Font.Gotham, UDim2.new(1, -63, 0, 7), UDim2.fromOffset(51, 11))
     record.time.TextXAlignment = Enum.TextXAlignment.Right
-    record.titleLabel = label(record, "Title", record.title, 14, Config.Text,
-        Enum.Font.GothamBold, UDim2.fromOffset(70, 30), UDim2.new(1, -87, 0, 19))
-    record.bodyLabel = label(record, "Content", record.content, 13, Config.Text,
-        Enum.Font.Gotham, UDim2.fromOffset(70, 52), UDim2.new(1, -87, 0, record.bodyHeight))
+    record.titleLabel = label(record, "Title", record.title, 12, Config.Text,
+        Enum.Font.GothamBold, UDim2.fromOffset(52, 20), UDim2.new(1, -64, 0, 15))
+    record.bodyLabel = label(record, "Content", record.content, Config.BodySize, Config.Text,
+        Enum.Font.Gotham, UDim2.fromOffset(52, 38), UDim2.new(1, -64, 0, record.bodyHeight))
     record.bodyLabel.TextWrapped = true
     record.bodyLabel.TextYAlignment = Enum.TextYAlignment.Top
     record.bodyLabel.Visible = record.content ~= ""
@@ -430,7 +422,7 @@ layoutRecord = function(record)
     measure(record)
     if record.frame then
         record.frame.Size = UDim2.fromOffset(record.width, record.height)
-        record.bodyLabel.Size = UDim2.new(1, -87, 0, record.bodyHeight)
+        record.bodyLabel.Size = UDim2.new(1, -64, 0, record.bodyHeight)
     end
 end
 
@@ -453,6 +445,7 @@ dismiss = function(record, direction)
     if dragging and dragging.record == record then dragging = nil end
     cancelThread(record.timer)
     cancelThread(record.enterTimer)
+    cancelThread(record.iconTimer)
     if not record.frame then
         finish(record)
         pump()
@@ -583,7 +576,8 @@ connect(host:GetPropertyChangedSignal("AbsoluteSize"), function()
         removeFrom(active, record)
         cancelThread(record.timer)
         cancelThread(record.enterTimer)
-        record.timer, record.enterTimer = nil, nil
+        cancelThread(record.iconTimer)
+        record.timer, record.enterTimer, record.iconTimer = nil, nil, nil
         for _, animation in pairs(record.tweens) do cancelTween(animation) end
         for _, connection in ipairs(record.connections) do connection:Disconnect() end
         if record.sound then record.sound:Destroy(); record.sound = nil end
