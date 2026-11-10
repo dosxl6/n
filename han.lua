@@ -1,1 +1,664 @@
-do local environment=(type(getgenv)=="function"and getgenv())or _G local legacy=environment.__SIEXTHER_VIP_GLASS_V1 if type(legacy)=="table"then legacy.blurSize=0 end local compact=environment.__SXLG2 if type(compact)=="table"and compact.Backdrop then compact.Backdrop.Destroy()compact.Backdrop.Add=function()end compact.Backdrop.Remove=function()end compact.Backdrop.Refresh=function()end end local prior=environment.__SXLG3 if type(prior)=="table"and prior.Backdrop then prior.Backdrop.Destroy()prior.Backdrop.Add=function()end prior.Backdrop.Remove=function()end prior.Backdrop.Refresh=function()end end local motion=environment.__SXLG4 if type(motion)=="table"and motion.Backdrop then motion.Backdrop.Destroy()motion.Backdrop.Add=function()end motion.Backdrop.Remove=function()end motion.Backdrop.Refresh=function()end end local acrylic=environment.__SXLG5 if type(acrylic)=="table"and acrylic.Backdrop then acrylic.Backdrop.Destroy()acrylic.Backdrop.Add=function()end acrylic.Backdrop.Remove=function()end acrylic.Backdrop.Refresh=function()end end local dark=environment.__SXLG6 if type(dark)=="table"then if dark.Windows then dark.Windows.Destroy()end if dark.Backdrop then dark.Backdrop.Destroy()dark.Backdrop.Add=function()end dark.Backdrop.Remove=function()end dark.Backdrop.Refresh=function()end end end local oldBlur=game:GetService("Lighting"):FindFirstChild("__VIPGlass_Blur")if oldBlur then oldBlur:Destroy()end if not environment.__SXLG7 then environment.__SXLG7=(function()local nativeInstance=Instance local nativeLoadString=loadstring local nativeGetEnvironment=getfenv local nativeSetEnvironment=setfenv local scheduler=task local TweenService=game:GetService("TweenService")local Lighting=game:GetService("Lighting")local Glass={Version="VIPUNIV-NativePanelGlass-7.0",primaryColor=Color3.fromRGB(70,130,255),accentColor=Color3.fromRGB(100,200,255),bgColor=Color3.fromRGB(43,62,91),buttonColor=Color3.fromRGB(219,232,255),sectionColor=Color3.fromRGB(219,232,255),textColor=Color3.fromRGB(255,255,255),panelTransparency=0.48,cardTransparency=0.88,panelRadius=22,cardRadius=7,}local prefix="__VIPGlass_"local roots={}local objects=setmetatable({},{__mode="k"})local environmentCache=setmetatable({},{__mode="k"})local refreshQueued=false local styleObject,queueObject,refreshBlur local paintProperties={BackgroundColor3=true,BackgroundTransparency=true,BorderSizePixel=true,Font=true,TextColor3=true,TextStrokeTransparency=true,PlaceholderColor3=true,ImageColor3=true,ImageTransparency=true,ScrollBarImageColor3=true,AutoButtonColor=true,TextYAlignment=true,}local function own(object)return object.Name:sub(1,#prefix)==prefix end local function put(record,property,value)if not paintProperties[property]then return end record.output[property]=value if record.object[property]~=value then record.object[property]=value end end local function floatingSurface(object,root)if not object:IsA("GuiButton")and not object:IsA("Frame")then return false end local width,height local size=object.Size width=size.X.Scale==0 and size.X.Offset or object.AbsoluteSize.X height=size.Y.Scale==0 and size.Y.Offset or object.AbsoluteSize.Y if width<24 or height<24 or width>110 or height>110 then return false end if width/height<0.55 or width/height>1.8 then return false end if object:IsA("Frame")then local name=object.Name:lower()local named=name:find("float",1,true)or name:find("minimiz",1,true)or name:find("restore",1,true)if not named then local covered=false for _,child in ipairs(object:GetChildren())do if child:IsA("GuiButton")and child.Size.X.Scale>=0.9 and child.Size.Y.Scale>=0.9 then covered=true end end if not covered then return false end end end local parent=object.Parent while parent and parent~=root do if parent:IsA("GuiObject")then local state=objects[parent]local alpha=state and state.source.BackgroundTransparency or parent.BackgroundTransparency if alpha<1 then return false end end parent=parent.Parent end return parent==root end local function insideFloating(object,root)local parent=object.Parent while parent and parent~=root do local record=objects[parent]if record and record.floating then return true end parent=parent.Parent end return false end local function namedChild(object,class,name)local child=object:FindFirstChild(name)if not child then child=nativeInstance.new(class)child.Name=name child.Parent=object end return child end local function gradient(object,name,rotation,colors,alpha)local existing=object:FindFirstChild(prefix..name)if existing then return existing end local fill=namedChild(object,"UIGradient",prefix..name)fill.Rotation=rotation fill.Color=ColorSequence.new(colors)if alpha then fill.Transparency=NumberSequence.new(alpha)end return fill end local function visible(object,root)if not root.Parent or not root.Enabled then return false end local parent=object while parent and parent~=root do if parent:IsA("GuiObject")and not parent.Visible then return false end if parent:IsA("CanvasGroup")and parent.GroupTransparency>=1 then return false end parent=parent.Parent end return parent==root end local function dimensions(object)local size,absolute=object.Size,object.AbsoluteSize local width=absolute.X>0 and absolute.X or size.X.Offset local height=absolute.Y>0 and absolute.Y or size.Y.Offset return width,height end local function hasLayout(object)return object:FindFirstChildOfClass("UIListLayout")or object:FindFirstChildOfClass("UIGridLayout")or object:FindFirstChildOfClass("UIPageLayout")or object:FindFirstChildOfClass("UITableLayout")end local function skip(object,root)if root:GetAttribute("VIPGlassIgnore")then return true end local rootName=root.Name:lower()if rootName=="hannsiexther_crosshair"or rootName=="explorerselections"or rootName=="alignindicator"then return true end local current=object while current and current~=root do if current:GetAttribute("VIPGlassIgnore")or current:IsA("ViewportFrame")or current:IsA("BillboardGui")or current:IsA("SurfaceGui")or own(current)then return true end local name=current.Name:lower()if name=="crosshairpreview"or name=="crosshaircanvas"or name=="radarcanvas"or name=="radarmap"or name=="hue"or name=="saturation"or name=="colorwheel"or name=="colorchoice"or name:find("swatch",1,true)or name=="syntaxhighlight"then return true end current=current.Parent end return false end local function saturated(color)local _,saturation,value=color:ToHSV()return saturation>0.32 and value>0.22 end local function statusColor(color)local h,s,v=color:ToHSV()return s>0.4 and v>0.55 and(h<0.17 or(h>0.2 and h<0.48)or h>0.95)end local function hasOpaqueAncestor(object,root)local parent=object.Parent while parent and parent~=root do if parent:IsA("GuiObject")then local record=objects[parent]local alpha=record and record.source.BackgroundTransparency or parent.BackgroundTransparency if alpha<1 then return true end end parent=parent.Parent end return false end local function integratedBarFill(record)local object,parent=record.object,record.object.Parent if not object:IsA("Frame")or not parent or not parent:IsA("GuiObject")or hasLayout(parent)or record.source.BackgroundTransparency>=1 then return false end for _,child in ipairs(object:GetChildren())do if child:IsA("GuiObject")and not own(child)then return false end end local name,parentName=object.Name:lower(),parent.Name:lower()local header=parentName:find("header",1,true)or parentName:find("title",1,true)or parentName:find("topbar",1,true)if not header and not name:find("mask",1,true)and not name:find("fix",1,true)then return false end local w,h=dimensions(object)local pw,ph=dimensions(parent)if ph<=0 or w<pw*0.9 or h>ph*0.75 then return false end local source=objects[parent]and objects[parent].source local color=source and source.BackgroundColor3 or parent.BackgroundColor3 local ownColor=record.source.BackgroundColor3 return math.abs(color.R-ownColor.R)<0.025 and math.abs(color.G-ownColor.G)<0.025 and math.abs(color.B-ownColor.B)<0.025 end local function alignBar(record,height)local object=record.object if height>64 or object.TextWrapped or object.Text:find("\n",1,true)or record.source.Font==Enum.Font.Code or record.source.Font==Enum.Font.RobotoMono then return end local name,parentName=object.Name:lower(),object.Parent.Name:lower()if not object:IsA("GuiButton")and not object:IsA("TextBox")and not name:find("title",1,true)and not parentName:find("header",1,true)and not parentName:find("title",1,true)and parentName~="topbar"then return end put(record,"TextYAlignment",Enum.TextYAlignment.Center)local padding=object:FindFirstChildOfClass("UIPadding")if padding and padding.PaddingTop.Scale==0 and padding.PaddingBottom.Scale==0 then local middle=(padding.PaddingTop.Offset+padding.PaddingBottom.Offset)/2 padding.PaddingTop,padding.PaddingBottom=UDim.new(0,middle),UDim.new(0,middle)end end local function windowTransition(object,root)local current=object while current and current~=root do local record=objects[current]if record and record.windowOpening then return true end current=current.Parent end return false end function Glass.surface(object,transparency,radius,edge)object.BackgroundTransparency=transparency object.BorderSizePixel=0 local corner=object:FindFirstChildOfClass("UICorner")if not corner then corner=namedChild(object,"UICorner",prefix.."Corner")end corner.CornerRadius=UDim.new(0,radius)local stroke=namedChild(object,"UIStroke",prefix.."Edge")stroke.Enabled=true stroke.ApplyStrokeMode=Enum.ApplyStrokeMode.Border stroke.Color=Glass.primaryColor stroke.Thickness=radius>=14 and 0.8 or 0.55 stroke.Transparency=edge or 0.78 gradient(stroke,"GlassEdge",125,{ColorSequenceKeypoint.new(0,Color3.fromRGB(133,184,255)),ColorSequenceKeypoint.new(0.35,Glass.primaryColor),ColorSequenceKeypoint.new(0.75,Color3.fromRGB(55,108,211)),ColorSequenceKeypoint.new(1,Color3.fromRGB(139,194,255)),},{NumberSequenceKeypoint.new(0,0),NumberSequenceKeypoint.new(0.38,0.36),NumberSequenceKeypoint.new(0.72,0.78),NumberSequenceKeypoint.new(1,0.12),})end local function fill(record,panel)local object=record.object for _,child in ipairs(object:GetChildren())do if child:IsA("UIGradient")and not own(child)then child.Enabled=false end end local tint if panel then tint=gradient(object,"GlassTint",100,{ColorSequenceKeypoint.new(0,Color3.fromRGB(230,244,255)),ColorSequenceKeypoint.new(0.42,Color3.fromRGB(148,185,233)),ColorSequenceKeypoint.new(1,Color3.fromRGB(209,231,255)),})else tint=gradient(object,"GlassFill",105,{ColorSequenceKeypoint.new(0,Color3.fromRGB(255,255,255)),ColorSequenceKeypoint.new(0.48,Color3.fromRGB(183,207,243)),ColorSequenceKeypoint.new(1,Color3.fromRGB(235,244,255)),})end tint.Enabled=true return tint end local function clearSurface(record)local object=record.object for _,name in ipairs({"Edge","GlassTint","GlassFill"})do local child=object:FindFirstChild(prefix..name)if child then child.Enabled=false end end end local function paintFloating(record)local object=record.object clearSurface(record)put(record,"BackgroundColor3",Color3.fromRGB(240,244,250))put(record,"BackgroundTransparency",record.hovering and 0.8 or 0.86)local corner=object:FindFirstChildOfClass("UICorner")if not corner then corner=namedChild(object,"UICorner",prefix.."Corner")end corner.CornerRadius=UDim.new(1,0)local edge=namedChild(object,"UIStroke",prefix.."Edge")edge.Enabled=true edge.ApplyStrokeMode=Enum.ApplyStrokeMode.Border edge.Color=Color3.fromRGB(245,248,255)edge.Thickness=1 edge.Transparency=0.78 for _,child in ipairs(edge:GetChildren())do if child:IsA("UIGradient")then child.Enabled=false end end for _,child in ipairs(object:GetChildren())do if child:IsA("UIGradient")then child.Enabled=false end if child:IsA("UIStroke")and child~=edge then child.Enabled=false end end if object:IsA("TextButton")then put(record,"TextColor3",Glass.textColor)end end local function stopMotion(record,destroy)record.motionToken=(record.motionToken or 0)+1 record.motionRunning=false if record.motionConnection then record.motionConnection:Disconnect();record.motionConnection=nil end if record.motionTween then record.motionTween:Cancel();record.motionTween=nil end if record.motionDelay and scheduler.cancel then pcall(scheduler.cancel,record.motionDelay)end record.motionDelay=nil if record.motionLayer then record.motionLayer.Visible=false if destroy then record.motionLayer:Destroy();record.motionLayer=nil end elseif record.motionGradient then record.motionGradient.Offset=Vector2.new(0,0)if destroy and record.restTint then record.motionGradient.Color=record.restTint record.motionGradient.Rotation=record.restRotation end end if destroy then record.motionGradient=nil;record.restTint=nil;record.motionMode=nil end end local function syncMotion(record)local object=record.object if record.dead or not record.panel or not object.Parent then stopMotion(record,true);return end local mode=hasLayout(object)and"tint"or"sheen"if record.motionMode and record.motionMode~=mode then stopMotion(record,true)end if not record.motionGradient then record.motionMode=mode if mode=="sheen"then local layer=nativeInstance.new("Frame")layer.Name=prefix.."LiquidSheen"layer.Active=false layer.Selectable=false pcall(function()layer.Interactable=false end)layer.BackgroundColor3=Color3.fromRGB(178,219,255)layer.BackgroundTransparency=0.95 layer.BorderSizePixel=0 layer.Position=UDim2.fromOffset(0,0)layer.Size=UDim2.fromScale(1,1)layer.ZIndex=object.ZIndex local corner=namedChild(layer,"UICorner",prefix.."SheenCorner")corner.CornerRadius=UDim.new(0,Glass.panelRadius)local shine=gradient(layer,"SheenFade",-12,{ColorSequenceKeypoint.new(0,Glass.textColor),ColorSequenceKeypoint.new(1,Glass.textColor),},{NumberSequenceKeypoint.new(0,1),NumberSequenceKeypoint.new(0.40,1),NumberSequenceKeypoint.new(0.47,0.18),NumberSequenceKeypoint.new(0.53,0.18),NumberSequenceKeypoint.new(0.60,1),NumberSequenceKeypoint.new(1,1),})layer.Parent=object record.motionLayer,record.motionGradient=layer,shine else local tint=object:FindFirstChild(prefix.."GlassTint")if not tint then return end record.restTint=tint.Color record.restRotation=tint.Rotation tint.Rotation=-12 tint.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(148,185,233)),ColorSequenceKeypoint.new(0.40,Color3.fromRGB(148,185,233)),ColorSequenceKeypoint.new(0.48,Color3.fromRGB(230,244,255)),ColorSequenceKeypoint.new(0.52,Color3.fromRGB(230,244,255)),ColorSequenceKeypoint.new(0.60,Color3.fromRGB(148,185,233)),ColorSequenceKeypoint.new(1,Color3.fromRGB(148,185,233)),})record.motionGradient=tint end end if not visible(object,record.root)then stopMotion(record,false);return end if record.motionLayer then record.motionLayer.Visible=true end if record.motionRunning then return end record.motionRunning=true record.motionToken=(record.motionToken or 0)+1 local token=record.motionToken local function sweep()record.motionDelay=nil if record.dead or record.motionToken~=token or not visible(object,record.root)then return end local shine=record.motionGradient shine.Offset=Vector2.new(-1,0)local tween=TweenService:Create(shine,TweenInfo.new(1.7,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{Offset=Vector2.new(1,0)})record.motionTween=tween record.motionConnection=tween.Completed:Connect(function(state)if record.motionConnection then record.motionConnection:Disconnect();record.motionConnection=nil end if record.dead or record.motionToken~=token or state~=Enum.PlaybackState.Completed then return end record.motionTween=nil record.motionDelay=scheduler.delay(7,sweep)end)tween:Play()end sweep()end Glass.Backdrop=(function()local Backdrop={}local entries={}local lastError,warned local function eligible(record)if record.dead or not record.panel or not visible(record.object,record.root)then return false end local size,screen=Glass.Read(record.object,"AbsoluteSize"),record.root.AbsoluteSize if size.X<2 or size.Y<28 then return false end return not(size.X>=screen.X*0.9 and size.Y>=screen.Y*0.9)end local function create(entry)if entry.attempted then return end entry.attempted=true local blur local ok,message=pcall(function()blur=nativeInstance.new("UIBlur")blur.Name=prefix.."PanelBackdropV7"blur.Enabled=false blur.Color=Color3.new(1,1,1)blur.Strength=Enum.UIBlurStrength.Heavy blur.Transparency=0 blur.Parent=entry.record.object end)if ok then entry.component=blur;lastError=nil else if blur then blur:Destroy()end lastError=tostring(message)if not warned then warned=true warn("SIEXTHER: UIBlur lokal belum didukung klien ini. Tema kaca tetap aktif; tidak ada blur kamera pengganti.")end end end function Backdrop.Add(record)if not entries[record]then entries[record]={record=record}end end function Backdrop.Remove(record)local entry=entries[record]if entry and entry.component then entry.component:Destroy()end entries[record]=nil end function Backdrop.Refresh(active)for _,entry in pairs(entries)do local shown=active and eligible(entry.record)if entry.component and entry.component.Parent~=entry.record.object then entry.component:Destroy()entry.component,entry.attempted=nil,nil end if shown then create(entry)end local component=entry.component if component then component.Enabled=shown end end end function Backdrop.Destroy()local records={}for record in pairs(entries)do records[#records+1]=record end for _,record in ipairs(records)do Backdrop.Remove(record)end end function Backdrop.Status()local panels,configured,active=0,0,0 for _,entry in pairs(entries)do panels=panels+1 if entry.component then configured=configured+1 if entry.component.Enabled then active=active+1 end end end return{Backend="native-panel-only",Panels=panels,Configured=configured,Active=active,LastError=lastError,RenderingVerified=false,CameraEffects=false}end return Backdrop end)()Glass.Windows=(function()local WindowFX={}local ghosts={}local function totalScale(object)local result,current=1,object while current and current:IsA("GuiObject")do local scale=current:FindFirstChildOfClass("UIScale")if scale then result=result*scale.Scale end current=current.Parent end return math.max(result,0.001)end local function clearGhost(record)local ghost=record.windowGhost if not ghost then return end record.windowGhost=nil ghosts[ghost]=nil if ghost.connection then ghost.connection:Disconnect()end for _,tween in ipairs(ghost.tweens or{})do tween:Cancel()end ghost.gui:Destroy()end function WindowFX.Stop(record)local motion=record.windowOpening if not motion then return end record.windowOpening=nil if motion.connection then motion.connection:Disconnect()end for _,tween in ipairs(motion.tweens)do tween:Cancel()end if record.object.Parent then record.object.Position=motion.rest end if motion.created then motion.scale:Destroy()elseif motion.scale.Parent then motion.scale.Scale=motion.base end end local function snapshot(record)local object,root=record.object,record.root if not object.Parent or not root.Parent or object.AbsoluteSize.X<2 or object.AbsoluteSize.Y<2 then return end local clone local archivable=object.Archivable local ok=pcall(function()object.Archivable=true clone=object:Clone()end)object.Archivable=archivable if not ok or not clone then return end local position,size=object.AbsolutePosition,object.AbsoluteSize local scale=totalScale(object)local origin=root.AbsolutePosition local gui=nativeInstance.new("ScreenGui")gui.Name=prefix.."ClosingWindow"gui.ResetOnSpawn=false gui.IgnoreGuiInset=root.IgnoreGuiInset pcall(function()gui.ScreenInsets=root.ScreenInsets gui.ClipToDeviceSafeArea=root.ClipToDeviceSafeArea gui.SafeAreaCompatibility=root.SafeAreaCompatibility end)gui.ZIndexBehavior=root.ZIndexBehavior gui.DisplayOrder=root.DisplayOrder+1 local group=nativeInstance.new("CanvasGroup")group.Name=prefix.."ClosingVisual"group.BackgroundTransparency=1 group.BorderSizePixel=0 group.Active,group.Selectable=false,false pcall(function()group.Interactable=false end)group.AnchorPoint=Vector2.new(0.5,0.5)group.Position=UDim2.fromOffset(position.X-origin.X+size.X/2,position.Y-origin.Y+size.Y/2)group.Size=UDim2.fromOffset(size.X/scale,size.Y/scale)group.GroupTransparency=0 local spring=nativeInstance.new("UIScale")spring.Name=prefix.."ClosingScale"spring.Scale=scale spring.Parent=group local ownScale=clone:FindFirstChildOfClass("UIScale")if ownScale then ownScale:Destroy()end clone.Name=prefix.."ClosingPanel"clone.AnchorPoint=Vector2.new(0,0)clone.Position=UDim2.fromOffset(0,0)clone.Size=UDim2.fromScale(1,1)clone.Visible=true clone.Active,clone.Selectable=false,false pcall(function()clone.Interactable=false end)for _,child in ipairs(clone:GetDescendants())do if child:IsA("LuaSourceContainer")then child:Destroy()elseif child:IsA("GuiObject")then child.Active,child.Selectable=false,false pcall(function()child.Interactable=false end)if child:IsA("ScrollingFrame")then child.ScrollingEnabled=false end end end clone.Parent=group group.Parent=gui gui.Parent=root.Parent return gui,group,spring,scale end function WindowFX.Close(record)if record.windowGhost or not record.windowShown then return end record.windowShown=false local gui,group,spring,scale=snapshot(record)WindowFX.Stop(record)if not gui then return end local position=group.Position local fade=TweenService:Create(group,TweenInfo.new(0.26,Enum.EasingStyle.Quart,Enum.EasingDirection.In),{GroupTransparency=1,Position=UDim2.new(position.X.Scale,position.X.Offset,position.Y.Scale,position.Y.Offset+12),})local shrink=TweenService:Create(spring,TweenInfo.new(0.26,Enum.EasingStyle.Quart,Enum.EasingDirection.In),{Scale=scale*0.88})local ghost={gui=gui,tweens={fade,shrink},record=record}record.windowGhost=ghost ghosts[ghost]=true ghost.connection=fade.Completed:Connect(function(state)if state==Enum.PlaybackState.Completed and record.windowGhost==ghost then clearGhost(record)end end)shrink:Play()fade:Play()end local function open(record)clearGhost(record)WindowFX.Stop(record)local object=record.object local state=roots[record.root]if state then for _,child in pairs(state.panels)do if child~=record and child.object:IsDescendantOf(object)then WindowFX.Stop(child)end end end local scale=object:FindFirstChildOfClass("UIScale")local created=not scale if not scale then scale=nativeInstance.new("UIScale")scale.Name=prefix.."WindowSpring"scale.Parent=object end local base,rest=scale.Scale,object.Position local motion={scale=scale,base=base,rest=rest,created=created,tweens={}}record.windowOpening=motion object.Position=UDim2.new(rest.X.Scale,rest.X.Offset,rest.Y.Scale,rest.Y.Offset+18)scale.Scale=base*0.84 local position=TweenService:Create(object,TweenInfo.new(0.44,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),{Position=rest})local spring=TweenService:Create(scale,TweenInfo.new(0.46,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Scale=base})motion.tweens={position,spring}motion.connection=spring.Completed:Connect(function(state)if state==Enum.PlaybackState.Completed and record.windowOpening==motion then WindowFX.Stop(record)end end)position:Play()spring:Play()end function WindowFX.Sync(record)if record.dead or not record.panel then return end local shown=visible(record.object,record.root)if shown==record.windowShown then return end if shown then record.windowShown=true if not windowTransition(record.object.Parent,record.root)then open(record)end else WindowFX.Close(record)end end function WindowFX.CloseTree(state,object)if not state then return end local function included(record)return not object or record.object==object or record.object:IsDescendantOf(object)end local top={}for _,record in pairs(state.panels)do if record.windowShown and included(record)then local parent,bundled=record.object.Parent,false while parent and parent~=record.root do local ancestor=state.panels[parent]if ancestor and ancestor.windowShown and included(ancestor)then bundled=true;break end parent=parent.Parent end if bundled then record.windowShown=false WindowFX.Stop(record)clearGhost(record)else top[#top+1]=record end end end for _,record in ipairs(top)do WindowFX.Close(record)end end function WindowFX.Forget(record)WindowFX.Stop(record)record.windowShown=false end function WindowFX.Geometry(object,property)local record=objects[object]if not record then return end local current=object while current and current~=record.root do local owner=objects[current]local motion=owner and owner.windowOpening if motion then local factor=motion.scale.Scale/math.max(motion.base,0.001)if factor<=0 then return end local size=object.AbsoluteSize if property=="AbsoluteSize"then return Vector2.new(size.X/factor,size.Y/factor)end local window,parent=owner.object,owner.object.Parent local p,area=parent.AbsolutePosition,parent.AbsoluteSize local parentScale=totalScale(parent)local rest,windowSize=motion.rest,window.AbsoluteSize local x=p.X+area.X*rest.X.Scale+rest.X.Offset*parentScale-windowSize.X/factor*window.AnchorPoint.X local y=p.Y+area.Y*rest.Y.Scale+rest.Y.Offset*parentScale-windowSize.Y/factor*window.AnchorPoint.Y local a,b=object.AbsolutePosition,window.AbsolutePosition return Vector2.new(x+(a.X-b.X)/factor,y+(a.Y-b.Y)/factor)end current=current.Parent end end function WindowFX.Destroy()local records={}for ghost in pairs(ghosts)do records[#records+1]=ghost.record end for _,record in ipairs(records)do clearGhost(record)end end return WindowFX end)()local function setPanel(record,isPanel)record.panel=isPanel record.backdrop=isPanel local state=roots[record.root]if state then state.panels[record.object]=isPanel and record or nil end if isPanel then Glass.Backdrop.Add(record)else Glass.Backdrop.Remove(record);stopMotion(record,true);Glass.Windows.Forget(record)end end local function watch(record,signal,callback)record.connections[#record.connections+1]=signal:Connect(callback)end local function dispose(record)if record.dead then return end record.dead=true for _,connection in ipairs(record.connections)do connection:Disconnect()end record.connections={}Glass.Windows.Stop(record)stopMotion(record,true)Glass.Backdrop.Remove(record)objects[record.object]=nil local root=roots[record.root]if root then root.objects[record.object]=nil;root.panels[record.object]=nil end end styleObject=function(record)local object,root=record.object,record.root if record.dead or not object.Parent or not object:IsDescendantOf(root)or skip(object,root)then if record.panel then setPanel(record,false)end return end local source=record.source local width,height=dimensions(object)local logicalHeight=object.Size.Y.Scale==0 and object.Size.Y.Offset or height local name=object.Name:lower()local text=object:IsA("TextLabel")or object:IsA("TextButton")or object:IsA("TextBox")local image=object:IsA("ImageLabel")or object:IsA("ImageButton")local button=object:IsA("GuiButton")local imageSurface=image and logicalHeight>=48 and object.Image~=""and not name:find("shadow",1,true)and not name:find("glow",1,true)and(object.ScaleType==Enum.ScaleType.Slice or name=="main"or name=="window"or name=="background"or name=="mainframe")record.writing=true put(record,"BorderSizePixel",0)if text then if source.Font~=Enum.Font.Code and source.Font~=Enum.Font.RobotoMono then put(record,"Font",Enum.Font.GothamBold)end put(record,"TextColor3",statusColor(source.TextColor3)and source.TextColor3 or Glass.textColor)put(record,"TextStrokeTransparency",1)alignBar(record,logicalHeight)if object:IsA("TextBox")then put(record,"PlaceholderColor3",Color3.fromRGB(180,191,210))end for _,child in ipairs(object:GetChildren())do if child:IsA("UIGradient")and not own(child)then child.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Glass.textColor),ColorSequenceKeypoint.new(0.3,Glass.primaryColor),ColorSequenceKeypoint.new(0.6,Glass.primaryColor),ColorSequenceKeypoint.new(1,Glass.textColor),})end end end if object:IsA("ScrollingFrame")then put(record,"ScrollBarImageColor3",Glass.primaryColor)end if button then put(record,"AutoButtonColor",false)end if integratedBarFill(record)then setPanel(record,false)clearSurface(record)put(record,"BackgroundTransparency",1)for _,child in ipairs(object:GetChildren())do if child:IsA("UIStroke")then child.Enabled=false end end record.writing=false return end if insideFloating(object,root)then setPanel(record,false)clearSurface(record)put(record,"BackgroundTransparency",1)if text then put(record,"TextColor3",Glass.textColor)end for _,child in ipairs(object:GetChildren())do if child:IsA("UIStroke")then child.Enabled=false end end record.writing=false return end local wasFloating=record.floating record.floating=source.BackgroundTransparency<1 and floatingSurface(object,root)if wasFloating~=record.floating then for _,child in ipairs(object:GetChildren())do if child:IsA("GuiObject")then queueObject(root,child)end end end if record.floating then setPanel(record,false)paintFloating(record)record.writing=false return end if image and object.Image~=""and not imageSurface then setPanel(record,false)if source.BackgroundTransparency<1 then put(record,"BackgroundColor3",Glass.buttonColor)put(record,"BackgroundTransparency",Glass.cardTransparency)record.output.BackgroundTransparency=Glass.cardTransparency Glass.surface(object,Glass.cardTransparency,Glass.cardRadius,0.76)end record.writing=false return end local transparent=not imageSurface and source.BackgroundTransparency>=1 local compact=object.Size.Y.Scale==0 and height>0 and height<=10 local knob=name:find("knob",1,true)or name:find("dragger",1,true)or name:find("thumb",1,true)or name=="toggleindicator"local track=(name:find("switch",1,true)or name:find("toggle",1,true))and width<=70 and height<=30 if not track and button and text and object.Text==""and width>22 and width<=65 and height>12 and height<=28 and#object:GetChildren()>0 then track=true end local panel=not transparent and(object:IsA("Frame")or object:IsA("CanvasGroup")or imageSurface)and not object:IsA("ScrollingFrame")and not compact and not knob and not track and(((not hasOpaqueAncestor(object,root))and(logicalHeight>=48 or object.Size.Y.Scale>0))or((name:find("popup",1,true)or name:find("modal",1,true)or name=="mainframe"or name=="window")and logicalHeight>=48))if imageSurface then put(record,"ImageTransparency",1)end setPanel(record,panel)if transparent then clearSurface(record)put(record,"BackgroundTransparency",1)elseif compact or knob or track then clearSurface(record)local active=saturated(source.BackgroundColor3)local color=knob and Glass.textColor or(active and Glass.primaryColor or Color3.fromRGB(176,189,211))local alpha=knob and 0 or(track and(active and 0.08 or 0.7)or(active and 0 or 0.8))put(record,"BackgroundColor3",color)put(record,"BackgroundTransparency",alpha)local corner=object:FindFirstChildOfClass("UICorner")if corner then corner.CornerRadius=UDim.new(1,0)end else local active=not panel and button and saturated(source.BackgroundColor3)local section=not panel and(name:find("sidebar",1,true)or name:find("header",1,true)or name=="topbar"or name=="titlebar"or name=="sxthr")local search=object:IsA("TextBox")or name:find("search",1,true)local alpha=panel and Glass.panelTransparency or(active and 0.28 or(section and 0.94 or(search and 0.9 or Glass.cardTransparency)))local color=panel and Glass.bgColor or(active and Glass.primaryColor or(section and Glass.sectionColor or Glass.buttonColor))put(record,"BackgroundColor3",color)put(record,"BackgroundTransparency",record.hovering and not panel and math.min(alpha,0.84)or alpha)local actualAlpha=record.output.BackgroundTransparency Glass.surface(object,actualAlpha,panel and Glass.panelRadius or Glass.cardRadius,panel and 0.36 or 0.76)record.output.BackgroundTransparency=actualAlpha fill(record,panel)end for _,child in ipairs(object:GetChildren())do if child:IsA("UIStroke")and not own(child)then child.Enabled=false end end record.writing=false if panel then syncMotion(record);Glass.Windows.Sync(record)end end queueObject=function(root,object)local state=roots[root]if not state or state.dead or own(object)then return end if not object:IsA("GuiObject")then if object.Parent and object.Parent:IsA("GuiObject")then queueObject(root,object.Parent)end return end if skip(object,root)then return end local record=objects[object]if record and record.root~=root then dispose(record);record=nil end if not record then state.serial=state.serial+1 record={object=object,root=root,source={},output={},connections={},id=state.serial}objects[object]=record state.objects[object]=record local properties={"BackgroundColor3","BackgroundTransparency","BorderSizePixel"}if object:IsA("TextLabel")or object:IsA("TextBox")or object:IsA("TextButton")then for _,property in ipairs({"TextColor3","Font","TextStrokeTransparency","TextYAlignment"})do properties[#properties+1]=property end end if object:IsA("ScrollingFrame")then properties[#properties+1]="ScrollBarImageColor3"properties[#properties+1]="ScrollBarThickness"end for _,property in ipairs(properties)do record.source[property]=object[property]watch(record,object:GetPropertyChangedSignal(property),function()if record.dead or record.writing or object[property]==record.output[property]then return end record.source[property]=object[property]queueObject(root,object)end)end for _,property in ipairs({"Visible","Size","AbsoluteSize","ClipsDescendants","Name"})do watch(record,object:GetPropertyChangedSignal(property),function()if not record.dead then if property=="AbsoluteSize"and windowTransition(object,root)then return end if property=="Visible"then if object.Visible then Glass.Windows.Sync(record)else Glass.Windows.CloseTree(roots[root],object)end end queueObject(root,object);refreshBlur()end end)end for _,property in ipairs({"Position","AnchorPoint"})do watch(record,object:GetPropertyChangedSignal(property),function()if not record.dead and record.panel then refreshBlur()end end)end if object:IsA("CanvasGroup")then watch(record,object:GetPropertyChangedSignal("GroupTransparency"),refreshBlur)end watch(record,object.Destroying,function()if record.panel then Glass.Windows.CloseTree(roots[root],object)end dispose(record);refreshBlur()end)if object:IsA("GuiButton")then watch(record,object.MouseEnter,function()record.hovering=true;queueObject(root,object)end)watch(record,object.MouseLeave,function()record.hovering=false;queueObject(root,object)end)end end state.pending[object]=record if state.queued then return end state.queued=true scheduler.defer(function()if state.dead then return end state.queued=false local pending=state.pending state.pending={}local count=0 for _,item in pairs(pending)do if not item.dead then styleObject(item)end count=count+1 if count%80==0 then scheduler.wait()end end refreshBlur()end)end refreshBlur=function()if refreshQueued then return end refreshQueued=true scheduler.defer(function()refreshQueued=false local active,any=false,false for root,state in pairs(roots)do if not state.dead then any=true for _,record in pairs(state.panels)do if record.backdrop and not record.dead then Glass.Windows.Sync(record)syncMotion(record)local _,height=dimensions(record.object)local shown=visible(record.object,root)local actual=record.object.AbsoluteSize if shown and actual.X>=2 and actual.Y>=28 then active=true end end end end end Glass.Backdrop.Refresh(active)if not any then Glass.Backdrop.Destroy()end end)end function Glass.attach(root)if not root:IsA("ScreenGui")or roots[root]then return root end local state={objects={},panels={},pending={},connections={},serial=0}roots[root]=state local function connect(signal,callback)state.connections[#state.connections+1]=signal:Connect(callback)end local function scan()if state.dead then return end for _,object in ipairs(root:GetDescendants())do if not own(object)then queueObject(root,object)end end refreshBlur()end connect(root.DescendantAdded,function(object)queueObject(root,object)end)connect(root.DescendantRemoving,function(object)local record=objects[object]if record and record.root==root then scheduler.defer(function()if not record.dead and not object:IsDescendantOf(root)then dispose(record);refreshBlur()end end)end end)connect(root:GetPropertyChangedSignal("Enabled"),function()if root.Enabled then for _,record in pairs(state.panels)do Glass.Windows.Sync(record)end else Glass.Windows.CloseTree(state)end refreshBlur()end)connect(root:GetPropertyChangedSignal("Name"),scan)connect(root:GetPropertyChangedSignal("AbsoluteSize"),refreshBlur)connect(root.AncestryChanged,refreshBlur)connect(root.Destroying,function()Glass.Windows.CloseTree(state)state.dead=true for _,connection in ipairs(state.connections)do connection:Disconnect()end local toRemove={}for _,record in pairs(state.objects)do toRemove[#toRemove+1]=record end for _,record in ipairs(toRemove)do dispose(record)end roots[root]=nil refreshBlur()end)scheduler.defer(scan)return root end function Glass.Destroy(object)local state=roots[object]if state then Glass.Windows.CloseTree(state)else local record=objects[object]if record then local root=roots[record.root]if root then Glass.Windows.CloseTree(root,object)end end end return object:Destroy()end Glass.Instance=setmetatable({},{__index=nativeInstance})function Glass.Instance.new(class,parent)local object=nativeInstance.new(class)if class=="ScreenGui"then Glass.attach(object)end if parent then object.Parent=parent end return object end local function environmentFor(base)base=base or _G local cached=environmentCache[base]if cached then return cached end local wrapped=setmetatable({},{__index=function(_,key)if key=="Instance"then return Glass.Instance end if key=="loadstring"then return Glass.LoadString end if key=="getfenv"then return Glass.GetEnvironment end return base[key]end,__newindex=function(_,key,value)base[key]=value end,})environmentCache[base]=wrapped environmentCache[wrapped]=wrapped return wrapped end function Glass.GetEnvironment(level)local base if nativeGetEnvironment then if level==nil then base=nativeGetEnvironment(2)elseif type(level)=="number"then base=nativeGetEnvironment(level==0 and 0 or level+1)else base=nativeGetEnvironment(level)end end return environmentFor(base)end function Glass.LoadString(source,chunkName)local compiled,message=nativeLoadString(source,chunkName)if compiled and nativeSetEnvironment then local base=nativeGetEnvironment and nativeGetEnvironment(compiled)or _G nativeSetEnvironment(compiled,environmentFor(base))end return compiled,message end function Glass.Read(object,property)local record=objects[object]if property=="AbsoluteSize"or property=="AbsolutePosition"then local geometry=Glass.Windows.Geometry(object,property)if geometry then return geometry end end if record and record.source[property]~=nil and object[property]==record.output[property]then return record.source[property]end return object[property]end return Glass end)()end __SXLG7=environment.__SXLG7 end local Players=game:GetService("Players")local TweenService=game:GetService("TweenService")local Debris=game:GetService("Debris")local Player=Players.LocalPlayer local PlayerGui=game.CoreGui local NotificationGui=__SXLG7.Instance.new("ScreenGui")NotificationGui.Name="NotificationSystem"NotificationGui.Parent=PlayerGui NotificationGui.ResetOnSpawn=false local SoundService=game:GetService("SoundService")local function playSound(soundId)local sound=__SXLG7.Instance.new("Sound")sound.SoundId="rbxassetid://"..soundId sound.Parent=SoundService sound.Volume=1.5 sound:Play()sound.Ended:Connect(function()__SXLG7.Destroy(sound)end)end local activeNotifications={}local notificationCount=0 local NOTIFICATION_WIDTH=280 local NOTIFICATION_HEIGHT=75 local NOTIFICATION_SPACING=10 local SLIDE_DISTANCE=400 local ANIMATION_SPEED=0.5 local function createNotification(title,content,duration)notificationCount=notificationCount+1 local notificationFrame=__SXLG7.Instance.new("Frame")notificationFrame.Name="Notification_"..notificationCount notificationFrame.Size=UDim2.new(0,NOTIFICATION_WIDTH,0,NOTIFICATION_HEIGHT)notificationFrame.BackgroundColor3=Color3.fromRGB(15,15,20)notificationFrame.BackgroundTransparency=0.05 notificationFrame.BorderSizePixel=0 notificationFrame.Parent=NotificationGui local corner=__SXLG7.Instance.new("UICorner")corner.CornerRadius=UDim.new(0,12)corner.Parent=notificationFrame playSound("18723584764")local stroke=__SXLG7.Instance.new("UIStroke")stroke.Color=Color3.fromRGB(70,130,255)stroke.Thickness=2 stroke.Transparency=0 stroke.Parent=notificationFrame local titleLabel=__SXLG7.Instance.new("TextLabel")titleLabel.Name="Title"titleLabel.Size=UDim2.new(1,-50,0,24)titleLabel.Position=UDim2.new(0,12,0,8)titleLabel.BackgroundTransparency=1 titleLabel.Text=title titleLabel.TextColor3=Color3.fromRGB(255,255,255)titleLabel.TextSize=15 titleLabel.TextXAlignment=Enum.TextXAlignment.Left titleLabel.TextYAlignment=Enum.TextYAlignment.Center titleLabel.Font=Enum.Font.GothamBold titleLabel.TextTruncate=Enum.TextTruncate.AtEnd titleLabel.Parent=notificationFrame local contentLabel=__SXLG7.Instance.new("TextLabel")contentLabel.Name="Content"contentLabel.Size=UDim2.new(1,-50,0,20)contentLabel.Position=UDim2.new(0,12,0,32)contentLabel.BackgroundTransparency=1 contentLabel.Text=content contentLabel.TextColor3=Color3.fromRGB(180,180,200)contentLabel.TextSize=12 contentLabel.TextXAlignment=Enum.TextXAlignment.Left contentLabel.TextYAlignment=Enum.TextYAlignment.Top contentLabel.Font=Enum.Font.Gotham contentLabel.TextWrapped=true contentLabel.Parent=notificationFrame local progressContainer=__SXLG7.Instance.new("Frame")progressContainer.Name="ProgressContainer"progressContainer.Size=UDim2.new(1,-24,0,3)progressContainer.Position=UDim2.new(0,12,1,-10)progressContainer.BackgroundColor3=Color3.fromRGB(30,30,40)progressContainer.BackgroundTransparency=0.3 progressContainer.BorderSizePixel=0 progressContainer.Parent=notificationFrame local progressCorner=__SXLG7.Instance.new("UICorner")progressCorner.CornerRadius=UDim.new(1,0)progressCorner.Parent=progressContainer local progressBar=__SXLG7.Instance.new("Frame")progressBar.Name="ProgressBar"progressBar.Size=UDim2.new(1,0,1,0)progressBar.BackgroundColor3=Color3.fromRGB(70,130,255)progressBar.BorderSizePixel=0 progressBar.Parent=progressContainer local progressBarCorner=__SXLG7.Instance.new("UICorner")progressBarCorner.CornerRadius=UDim.new(1,0)progressBarCorner.Parent=progressBar local closeButton=__SXLG7.Instance.new("TextButton")closeButton.Size=UDim2.new(0,30,0,30)closeButton.Position=UDim2.new(1,-38,0,8)closeButton.BackgroundTransparency=1 closeButton.Text="×"closeButton.TextColor3=Color3.fromRGB(180,180,200)closeButton.TextSize=24 closeButton.Font=Enum.Font.GothamBold closeButton.Parent=notificationFrame closeButton.MouseEnter:Connect(function()TweenService:Create(closeButton,TweenInfo.new(0.2),{TextColor3=Color3.fromRGB(255,80,80)}):Play()end)closeButton.MouseLeave:Connect(function()TweenService:Create(closeButton,TweenInfo.new(0.2),{TextColor3=Color3.fromRGB(180,180,200)}):Play()end)local yPosition=(#activeNotifications*(NOTIFICATION_HEIGHT+NOTIFICATION_SPACING))+50 notificationFrame.Position=UDim2.new(1,SLIDE_DISTANCE,0,yPosition)table.insert(activeNotifications,notificationFrame)local function updatePositions()for i,notification in ipairs(activeNotifications)do local newY=((i-1)*(NOTIFICATION_HEIGHT+NOTIFICATION_SPACING))+50 local tweenInfo=TweenInfo.new(ANIMATION_SPEED,Enum.EasingStyle.Quart,Enum.EasingDirection.Out)local tween=TweenService:Create(notification,tweenInfo,{Position=UDim2.new(1,-NOTIFICATION_WIDTH-20,0,newY)})tween:Play()end end local slideInTween=TweenService:Create(notificationFrame,TweenInfo.new(ANIMATION_SPEED,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Position=UDim2.new(1,-NOTIFICATION_WIDTH-20,0,yPosition)})slideInTween:Play()local function removeNotification()for i,notification in ipairs(activeNotifications)do if notification==notificationFrame then table.remove(activeNotifications,i)break end end local fadeOutTween=TweenService:Create(notificationFrame,TweenInfo.new(ANIMATION_SPEED*0.7,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{BackgroundTransparency=1})local strokeFadeTween=TweenService:Create(stroke,TweenInfo.new(ANIMATION_SPEED*0.7,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Transparency=1})local slideOutTween=TweenService:Create(notificationFrame,TweenInfo.new(ANIMATION_SPEED,Enum.EasingStyle.Quart,Enum.EasingDirection.In),{Position=UDim2.new(1,SLIDE_DISTANCE,0,notificationFrame.Position.Y.Offset)})fadeOutTween:Play()strokeFadeTween:Play()slideOutTween:Play()slideOutTween.Completed:Connect(function()__SXLG7.Destroy(notificationFrame)updatePositions()end)end closeButton.MouseButton1Click:Connect(removeNotification)if duration and duration>0 then local progressTween=TweenService:Create(progressBar,TweenInfo.new(duration,Enum.EasingStyle.Linear,Enum.EasingDirection.InOut),{Size=UDim2.new(0,0,1,0)})progressTween:Play()progressTween.Completed:Connect(function()if notificationFrame.Parent then removeNotification()end end)end end getgenv().Notify=function(options)local title=options.Title or"Notification"local content=options.Content or"No content provided"local duration=options.Duration or 5 task.spawn(function()createNotification(title,content,duration)end)end
+-- SIEXTHER EVO | iOS-inspired Liquid Glass notifications
+-- Replace the old notification block with this file, or execute it on its own.
+-- Keep the existing __SXLG7 theme above this block if other GUIs use that theme.
+-- The existing Notify({Title = ..., Content = ..., Duration = ...}) API is kept.
+-- No progress bar, camera blur, Lighting effects, or per-frame animation loop.
+-- Native UIBlur is optional/experimental; creating it does not verify rendering.
+-- Unsupported clients retain the layered glass material instead of camera blur.
+-- Example (uncomment to preview):
+-- Notify({Title = "SIEXTHER EVO", Content = "Notifikasi liquid glass aktif.", Duration = 5})
+
+local environment = (type(getgenv) == "function" and getgenv()) or _G
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local TextService = game:GetService("TextService")
+local UserInputService = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
+local Debris = game:GetService("Debris")
+local player = Players.LocalPlayer
+assert(player, "Run SIEXTHER notifications on the client.")
+
+local previous = environment.__SIEXTHER_IOS_NOTIFICATIONS
+if type(previous) == "table" and type(previous.Destroy) == "function" then
+    pcall(previous.Destroy)
+end
+
+local Config = {
+    AppName = "SIEXTHER EVO",
+    Width = 366,
+    Margin = 16,
+    Top = 10, -- Added below Roblox's device-safe top inset.
+    Gap = 10,
+    Radius = 26,
+    MaxVisible = 3,
+    MaxQueued = 40,
+    Accent = Color3.fromRGB(70, 130, 255),
+    Text = Color3.fromRGB(24, 30, 41),
+    Secondary = Color3.fromRGB(83, 93, 111),
+    SoundId = "rbxassetid://18723584764",
+    Volume = 0.22,
+    NativeBlur = true,
+}
+
+local Controller = { Config = Config }
+local active, pending, connections, records = {}, {}, {}, {}
+local destroyed, dragging, pumping, pumpAgain = false, nil, false, false
+local sequence = 0
+local blurStatus = "not-attempted"
+local pump, reflow, dismiss, layoutRecord
+
+local function make(className, properties, parent)
+    local object = Instance.new(className)
+    for property, value in pairs(properties or {}) do
+        object[property] = value
+    end
+    object.Parent = parent
+    return object
+end
+
+local function connect(signal, callback, bucket)
+    local connection = signal:Connect(callback)
+    table.insert(bucket or connections, connection)
+    return connection
+end
+
+local function cancelThread(thread)
+    if thread then
+        pcall(task.cancel, thread)
+    end
+end
+
+local function cancelTween(tween)
+    if tween then
+        tween:Cancel()
+    end
+end
+
+local function tween(record, slot, object, duration, style, direction, goal)
+    cancelTween(record.tweens[slot])
+    local result = TweenService:Create(object, TweenInfo.new(duration, style, direction), goal)
+    record.tweens[slot] = result
+    result:Play()
+    return result
+end
+
+local function corner(object, radius)
+    return make("UICorner", { CornerRadius = UDim.new(0, radius) }, object)
+end
+
+local gui = make("ScreenGui", {
+    Name = "SIEXTHER_iOS_Notifications",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = false,
+    DisplayOrder = 10000,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+})
+-- Existing global glass wrappers must leave this deliberately styled GUI alone.
+gui:SetAttribute("VIPGlassIgnore", true)
+pcall(function()
+    gui.ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets
+    gui.ClipToDeviceSafeArea = true
+end)
+
+local playerGui = player:WaitForChild("PlayerGui")
+local coreGui
+pcall(function() coreGui = game:GetService("CoreGui") end)
+local hosted = false
+if coreGui then
+    hosted = pcall(function() gui.Parent = coreGui end)
+end
+if not hosted then
+    gui.Parent = playerGui
+end
+
+-- Remove the old banner container only when its structure matches the supplied code.
+for _, parent in ipairs({ playerGui, coreGui or playerGui }) do
+    local old = parent:FindFirstChild("NotificationSystem")
+    if old and old:IsA("ScreenGui") then
+        local recognized = #old:GetChildren() == 0
+        for _, child in ipairs(old:GetChildren()) do
+            if child.Name:match("^Notification_%d+$") and child:FindFirstChild("ProgressContainer") then
+                recognized = true
+                break
+            end
+        end
+        if recognized then old:Destroy() end
+    end
+end
+
+local host = make("Frame", {
+    Name = "BannerHost",
+    Size = UDim2.fromScale(1, 1),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Active = false,
+    ClipsDescendants = false,
+}, gui)
+
+local function screenSize()
+    local size = host.AbsoluteSize
+    if size.X > 0 and size.Y > 0 then return size end
+    local camera = workspace.CurrentCamera
+    return camera and camera.ViewportSize or Vector2.new(390, 740)
+end
+
+local function bannerWidth()
+    return math.max(1, math.min(Config.Width, screenSize().X - Config.Margin * 2))
+end
+
+local function bodyHeight(text, width)
+    if text == "" then return 0 end
+    local ok, bounds = pcall(function()
+        return TextService:GetTextSize(text, 13, Enum.Font.Gotham, Vector2.new(width, 10000))
+    end)
+    return math.clamp(ok and math.ceil(bounds.Y) + 3 or 34, 17, 51)
+end
+
+local function measure(record)
+    record.width = bannerWidth()
+    record.bodyHeight = bodyHeight(record.content, math.max(1, record.width - 90))
+    record.height = record.content == "" and 76 or 63 + record.bodyHeight
+end
+
+local function attemptBlur(surface)
+    if not Config.NativeBlur or blurStatus == "unavailable" then return end
+    local blur
+    local ok = pcall(function()
+        blur = Instance.new("UIBlur")
+        blur.Name = "LocalBackdrop"
+        blur.Enabled = true
+        -- Protect each experimental property separately across client versions.
+        pcall(function() blur.Color = Color3.new(1, 1, 1) end)
+        pcall(function() blur.Color3 = Color3.new(1, 1, 1) end)
+        pcall(function() blur.Strength = Enum.UIBlurStrength.Heavy end)
+        pcall(function() blur.Transparency = 0 end)
+        blur.Parent = surface
+    end)
+    if ok then
+        blurStatus = "component-created-rendering-unverified"
+    else
+        if blur then blur:Destroy() end
+        blurStatus = "unavailable"
+    end
+end
+
+local function playSound(record)
+    if record.options.Sound == false or Config.Volume <= 0 then return end
+    local sound = make("Sound", {
+        Name = "SIEXTHER_NotificationSound",
+        SoundId = Config.SoundId,
+        Volume = Config.Volume,
+    }, SoundService)
+    record.sound = sound
+    Debris:AddItem(sound, 6)
+    sound:Play()
+end
+
+local function removeFrom(list, record)
+    local index = table.find(list, record)
+    if index then table.remove(list, index) end
+end
+
+local function finish(record)
+    if record.finished then return end
+    record.finished = true
+    cancelThread(record.timer)
+    cancelThread(record.enterTimer)
+    cancelThread(record.cleanupTimer)
+    for _, animation in pairs(record.tweens) do cancelTween(animation) end
+    for _, connection in ipairs(record.connections) do connection:Disconnect() end
+    if dragging and dragging.record == record then dragging = nil end
+    if record.sound then record.sound:Destroy() end
+    if record.frame then record.frame:Destroy() end
+    removeFrom(active, record)
+    removeFrom(pending, record)
+    records[record] = nil
+end
+
+local function fade(record, alpha, duration)
+    for index, target in ipairs(record.fades) do
+        local value = target.base + (1 - target.base) * alpha
+        tween(record, "fade" .. index, target.object, duration,
+            Enum.EasingStyle.Quad, Enum.EasingDirection.Out, { [target.property] = value })
+    end
+end
+
+local function registerFade(record, object, property)
+    record.fades[#record.fades + 1] = {
+        object = object,
+        property = property,
+        base = object[property],
+    }
+    object[property] = 1
+end
+
+local function label(record, name, text, size, color, font, position, dimensions)
+    local result = make("TextLabel", {
+        Name = name,
+        Text = text,
+        TextSize = size,
+        TextColor3 = color,
+        Font = font,
+        RichText = false,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Position = position,
+        Size = dimensions,
+        ZIndex = 3,
+    }, record.surface)
+    registerFade(record, result, "TextTransparency")
+    return result
+end
+
+local function createVisual(record)
+    local frame = make("Frame", {
+        Name = "Notification_" .. record.id,
+        AnchorPoint = Vector2.new(0.5, 0),
+        Position = UDim2.new(0.5, 0, 0, -record.height - 24),
+        Size = UDim2.fromOffset(record.width, record.height),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 10 + record.id % 100,
+    }, host)
+    record.frame = frame
+    record.scale = make("UIScale", { Scale = 0.9 }, frame)
+
+    -- Soft rounded depth, kept behind the glass rather than on its edges.
+    for index, expansion in ipairs({ 10, 6, 2 }) do
+        local shadow = make("Frame", {
+            Name = "SoftShadow" .. index,
+            Position = UDim2.fromOffset(-expansion, 5 - expansion),
+            Size = UDim2.new(1, expansion * 2, 1, expansion * 2),
+            BackgroundColor3 = Color3.fromRGB(10, 19, 39),
+            BackgroundTransparency = 0.965 - index * 0.008,
+            BorderSizePixel = 0,
+            ZIndex = 1,
+        }, frame)
+        corner(shadow, Config.Radius + expansion)
+        registerFade(record, shadow, "BackgroundTransparency")
+    end
+
+    local surface = make("Frame", {
+        Name = "LiquidGlass",
+        Size = UDim2.fromScale(1, 1),
+        BackgroundColor3 = Color3.fromRGB(228, 236, 249),
+        BackgroundTransparency = 0.16,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        ZIndex = 2,
+    }, frame)
+    record.surface = surface
+    corner(surface, Config.Radius)
+    make("UIGradient", {
+        Rotation = 105,
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+            ColorSequenceKeypoint.new(0.45, Color3.fromRGB(227, 236, 250)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(242, 246, 255)),
+        }),
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0),
+            NumberSequenceKeypoint.new(0.55, 0.07),
+            NumberSequenceKeypoint.new(1, 0.015),
+        }),
+    }, surface)
+    registerFade(record, surface, "BackgroundTransparency")
+    attemptBlur(surface)
+
+    local edge = make("UIStroke", {
+        Name = "GlassRim",
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        Color = Color3.fromRGB(255, 255, 255),
+        Thickness = 1,
+        Transparency = 0.34,
+    }, surface)
+    make("UIGradient", {
+        Rotation = 90,
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0),
+            NumberSequenceKeypoint.new(0.48, 0.58),
+            NumberSequenceKeypoint.new(1, 0.14),
+        }),
+    }, edge)
+    registerFade(record, edge, "Transparency")
+
+    local sheen = make("Frame", {
+        Name = "LiquidReflection",
+        Size = UDim2.fromScale(1, 1),
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BackgroundTransparency = 0.87,
+        BorderSizePixel = 0,
+        ZIndex = 2,
+    }, surface)
+    corner(sheen, Config.Radius)
+    record.shine = make("UIGradient", {
+        Rotation = -18,
+        Offset = Vector2.new(-1, 0),
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 1),
+            NumberSequenceKeypoint.new(0.34, 1),
+            NumberSequenceKeypoint.new(0.49, 0.08),
+            NumberSequenceKeypoint.new(0.56, 0.08),
+            NumberSequenceKeypoint.new(0.72, 1),
+            NumberSequenceKeypoint.new(1, 1),
+        }),
+    }, sheen)
+    registerFade(record, sheen, "BackgroundTransparency")
+
+    local icon = make("Frame", {
+        Name = "AppIcon",
+        Position = UDim2.new(0, 16, 0.5, -21),
+        Size = UDim2.fromOffset(42, 42),
+        BackgroundColor3 = Config.Accent,
+        BackgroundTransparency = 0,
+        BorderSizePixel = 0,
+        ZIndex = 3,
+    }, surface)
+    corner(icon, 13)
+    make("UIGradient", {
+        Rotation = 70,
+        Color = ColorSequence.new(Color3.fromRGB(117, 182, 255), Color3.fromRGB(43, 103, 241)),
+    }, icon)
+    registerFade(record, icon, "BackgroundTransparency")
+    if record.options.Icon and tostring(record.options.Icon) ~= "" then
+        local asset = tostring(record.options.Icon)
+        if tonumber(asset) then asset = "rbxassetid://" .. asset end
+        local image = make("ImageLabel", {
+            Name = "CustomIcon",
+            Image = asset,
+            Size = UDim2.fromScale(1, 1),
+            BackgroundTransparency = 1,
+            ScaleType = Enum.ScaleType.Fit,
+        }, icon)
+        corner(image, 13)
+        registerFade(record, image, "ImageTransparency")
+    else
+        local initials = make("TextLabel", {
+            Name = "SX",
+            Text = "SX",
+            Font = Enum.Font.GothamBold,
+            TextSize = 16,
+            TextColor3 = Color3.new(1, 1, 1),
+            BackgroundTransparency = 1,
+            Size = UDim2.fromScale(1, 1),
+        }, icon)
+        registerFade(record, initials, "TextTransparency")
+    end
+
+    record.app = label(record, "AppName", record.appName, 10, Config.Secondary,
+        Enum.Font.GothamMedium, UDim2.fromOffset(70, 12), UDim2.new(1, -150, 0, 14))
+    record.time = label(record, "Time", "sekarang", 10, Config.Secondary,
+        Enum.Font.Gotham, UDim2.new(1, -75, 0, 12), UDim2.fromOffset(58, 14))
+    record.time.TextXAlignment = Enum.TextXAlignment.Right
+    record.titleLabel = label(record, "Title", record.title, 14, Config.Text,
+        Enum.Font.GothamBold, UDim2.fromOffset(70, 30), UDim2.new(1, -87, 0, 19))
+    record.bodyLabel = label(record, "Content", record.content, 13, Config.Text,
+        Enum.Font.Gotham, UDim2.fromOffset(70, 52), UDim2.new(1, -87, 0, record.bodyHeight))
+    record.bodyLabel.TextWrapped = true
+    record.bodyLabel.TextYAlignment = Enum.TextYAlignment.Top
+    record.bodyLabel.Visible = record.content ~= ""
+
+    local hit = make("TextButton", {
+        Name = "TapOrSwipeToDismiss",
+        Text = "",
+        BackgroundTransparency = 1,
+        Size = UDim2.fromScale(1, 1),
+        AutoButtonColor = false,
+        ZIndex = 20,
+    }, surface)
+    corner(hit, Config.Radius)
+    connect(hit.InputBegan, function(input)
+        local kind = input.UserInputType
+        if destroyed or record.closing or dragging then return end
+        if kind ~= Enum.UserInputType.Touch and kind ~= Enum.UserInputType.MouseButton1 then return end
+        cancelTween(record.tweens.position)
+        dragging = {
+            record = record,
+            input = input,
+            kind = kind,
+            start = Vector2.new(input.Position.X, input.Position.Y),
+            origin = frame.Position,
+            delta = Vector2.new(0, 0),
+        }
+    end, record.connections)
+end
+
+layoutRecord = function(record)
+    measure(record)
+    if record.frame then
+        record.frame.Size = UDim2.fromOffset(record.width, record.height)
+        record.bodyLabel.Size = UDim2.new(1, -87, 0, record.bodyHeight)
+    end
+end
+
+reflow = function()
+    local y = Config.Top
+    for _, record in ipairs(active) do
+        record.restY = y
+        if not dragging or dragging.record ~= record then
+            tween(record, "position", record.frame, record.entering and 0.48 or 0.32,
+                record.entering and Enum.EasingStyle.Back or Enum.EasingStyle.Quint,
+                Enum.EasingDirection.Out, { Position = UDim2.new(0.5, 0, 0, y) })
+        end
+        y = y + record.height + Config.Gap
+    end
+end
+
+dismiss = function(record, direction)
+    if destroyed or record.finished or record.closing then return end
+    record.closing = true
+    if dragging and dragging.record == record then dragging = nil end
+    cancelThread(record.timer)
+    cancelThread(record.enterTimer)
+    if not record.frame then
+        finish(record)
+        pump()
+        return
+    end
+    removeFrom(active, record)
+    reflow()
+    fade(record, 1, 0.22)
+    tween(record, "scale", record.scale, 0.25, Enum.EasingStyle.Quart,
+        Enum.EasingDirection.In, { Scale = 0.92 })
+    local goal = UDim2.new(0.5, 0, 0, -record.height - 24)
+    if direction == "right" then
+        goal = UDim2.new(1, record.width, 0, record.frame.Position.Y.Offset)
+    end
+    tween(record, "position", record.frame, 0.28, Enum.EasingStyle.Quart,
+        Enum.EasingDirection.In, { Position = goal })
+    record.cleanupTimer = task.delay(0.3, function()
+        record.cleanupTimer = nil
+        finish(record)
+    end)
+    pump()
+end
+
+local function show(record)
+    record.entering = true
+    table.insert(active, record)
+    createVisual(record)
+    fade(record, 0, 0.25)
+    tween(record, "scale", record.scale, 0.5, Enum.EasingStyle.Back,
+        Enum.EasingDirection.Out, { Scale = 1 })
+    tween(record, "shine", record.shine, 1.2, Enum.EasingStyle.Sine,
+        Enum.EasingDirection.InOut, { Offset = Vector2.new(1, 0) })
+    reflow()
+    playSound(record)
+    record.enterTimer = task.delay(0.52, function()
+        record.enterTimer = nil
+        if destroyed or record.closing or record.finished then return end
+        record.entering = false
+        if record.duration > 0 then
+            record.timer = task.delay(record.duration, function()
+                record.timer = nil
+                dismiss(record)
+            end)
+        end
+    end)
+end
+
+pump = function()
+    if destroyed then return end
+    if pumping then pumpAgain = true; return end
+    pumping = true
+    repeat
+        pumpAgain = false
+        while #pending > 0 and #active < Config.MaxVisible do
+            local nextRecord = pending[1]
+            measure(nextRecord)
+            local used = Config.Top
+            for _, record in ipairs(active) do used = used + record.height + Config.Gap end
+            if #active > 0 and used + nextRecord.height > screenSize().Y - Config.Margin then break end
+            table.remove(pending, 1)
+            show(nextRecord)
+        end
+    until not pumpAgain
+    pumping = false
+end
+
+connect(UserInputService.InputChanged, function(input)
+    local gesture = dragging
+    if not gesture then return end
+    if gesture.kind == Enum.UserInputType.Touch then
+        if input ~= gesture.input then return end
+    elseif input.UserInputType ~= Enum.UserInputType.MouseMovement then
+        return
+    end
+    local record = gesture.record
+    local delta = Vector2.new(input.Position.X, input.Position.Y) - gesture.start
+    gesture.delta = delta
+    record.frame.Position = UDim2.new(gesture.origin.X.Scale,
+        gesture.origin.X.Offset + math.max(0, delta.X), 0,
+        gesture.origin.Y.Offset + (delta.Y < 0 and delta.Y or delta.Y * 0.18))
+end)
+
+connect(UserInputService.InputEnded, function(input)
+    local gesture = dragging
+    if not gesture then return end
+    if gesture.kind == Enum.UserInputType.Touch then
+        if input ~= gesture.input then return end
+    elseif input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+        return
+    end
+    dragging = nil
+    local record, delta = gesture.record, gesture.delta
+    if record.finished or record.closing then return end
+    if delta.Y < -32 or delta.X > record.width * 0.22 then
+        dismiss(record, delta.X > math.abs(delta.Y) and "right" or "up")
+    elseif delta.Magnitude < 9 then
+        dismiss(record)
+        if type(record.options.OnClick) == "function" then
+            task.spawn(function()
+                local ok, message = pcall(record.options.OnClick)
+                if not ok then warn("SIEXTHER notification OnClick: " .. tostring(message)) end
+            end)
+        end
+    else
+        reflow()
+    end
+end)
+
+connect(UserInputService.WindowFocusReleased, function()
+    if dragging then dragging = nil; reflow() end
+end)
+
+connect(host:GetPropertyChangedSignal("AbsoluteSize"), function()
+    if destroyed then return end
+    dragging = nil
+    for _, record in ipairs(active) do layoutRecord(record) end
+    -- On rotation, move excess cards back into the queue without dropping them.
+    local used, overflow = Config.Top, {}
+    for index, record in ipairs(active) do
+        if index > 1 and used + record.height > screenSize().Y - Config.Margin then
+            table.insert(overflow, record)
+        else
+            used = used + record.height + Config.Gap
+        end
+    end
+    for index = #overflow, 1, -1 do
+        local record = overflow[index]
+        removeFrom(active, record)
+        cancelThread(record.timer)
+        cancelThread(record.enterTimer)
+        record.timer, record.enterTimer = nil, nil
+        for _, animation in pairs(record.tweens) do cancelTween(animation) end
+        for _, connection in ipairs(record.connections) do connection:Disconnect() end
+        if record.sound then record.sound:Destroy(); record.sound = nil end
+        record.frame:Destroy()
+        record.frame, record.tweens, record.connections, record.fades = nil, {}, {}, {}
+        table.insert(pending, 1, record)
+    end
+    reflow()
+    pump()
+end)
+
+function Controller.Notify(options)
+    if destroyed then return nil, "Notification system has been destroyed." end
+    options = type(options) == "table" and options or { Content = tostring(options or "") }
+    if #pending >= Config.MaxQueued then return nil, "Notification queue is full." end
+    local duration = tonumber(options.Duration)
+    if not duration or duration ~= duration then duration = 5 end
+    duration = math.clamp(duration, 0, 86400) -- 0 keeps the banner until dismissed.
+    sequence = sequence + 1
+    local record = {
+        id = sequence,
+        options = options,
+        title = tostring(options.Title or "Notification"),
+        content = tostring(options.Content or "No content provided"),
+        appName = tostring(options.AppName or Config.AppName),
+        duration = duration,
+        tweens = {},
+        connections = {},
+        fades = {},
+    }
+    local handle = {}
+    function handle.Close() dismiss(record) end
+    function handle.IsClosed() return record.closing == true or record.finished == true end
+    records[record] = true
+    table.insert(pending, record)
+    pump()
+    return handle
+end
+
+function Controller.Clear()
+    local queued = pending
+    pending = {}
+    for _, record in ipairs(queued) do record.closing = true; finish(record) end
+    local shown = {}
+    for _, record in ipairs(active) do table.insert(shown, record) end
+    for _, record in ipairs(shown) do dismiss(record) end
+end
+
+function Controller.Status()
+    return {
+        Active = #active,
+        Queued = #pending,
+        NativeBlur = blurStatus,
+        RenderingVerified = false,
+        CameraEffects = false,
+    }
+end
+
+function Controller.Destroy()
+    if destroyed then return end
+    destroyed = true
+    dragging = nil
+    for _, connection in ipairs(connections) do connection:Disconnect() end
+    -- Include queued banners and banners already in their closing animation.
+    local remaining = {}
+    for record in pairs(records) do table.insert(remaining, record) end
+    for _, record in ipairs(remaining) do finish(record) end
+    gui:Destroy()
+    if environment.Notify == Controller.Notify then environment.Notify = nil end
+    if environment.__SIEXTHER_IOS_NOTIFICATIONS == Controller then
+        environment.__SIEXTHER_IOS_NOTIFICATIONS = nil
+    end
+end
+
+environment.__SIEXTHER_IOS_NOTIFICATIONS = Controller
+environment.Notify = Controller.Notify
+
+return Controller
