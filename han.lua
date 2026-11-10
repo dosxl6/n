@@ -358,7 +358,7 @@ local function createVisual(record)
 
     record.app = label(record, "AppName", record.appName, 8, Config.Secondary,
         Enum.Font.GothamMedium, UDim2.fromOffset(12, 6), UDim2.new(1, -76, 0, 10))
-    record.time = label(record, "Time", "sekarang", 8, Config.Secondary,
+    record.time = label(record, "Time", "now", 8, Config.Secondary,
         Enum.Font.Gotham, UDim2.new(1, -63, 0, 6), UDim2.fromOffset(51, 10))
     record.time.TextXAlignment = Enum.TextXAlignment.Right
     record.titleLabel = label(record, "Title", record.title, 12, Config.Text,
