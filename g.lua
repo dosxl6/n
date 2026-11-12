@@ -1,1 +1,1186 @@
-do local environment=(type(getgenv)=="function"and getgenv())or _G local legacy=environment.__SIEXTHER_VIP_GLASS_V1 if type(legacy)=="table"then legacy.blurSize=0 end local compact=environment.__SXLG2 if type(compact)=="table"and compact.Backdrop then compact.Backdrop.Destroy()compact.Backdrop.Add=function()end compact.Backdrop.Remove=function()end compact.Backdrop.Refresh=function()end end local prior=environment.__SXLG3 if type(prior)=="table"and prior.Backdrop then prior.Backdrop.Destroy()prior.Backdrop.Add=function()end prior.Backdrop.Remove=function()end prior.Backdrop.Refresh=function()end end local motion=environment.__SXLG4 if type(motion)=="table"and motion.Backdrop then motion.Backdrop.Destroy()motion.Backdrop.Add=function()end motion.Backdrop.Remove=function()end motion.Backdrop.Refresh=function()end end local acrylic=environment.__SXLG5 if type(acrylic)=="table"and acrylic.Backdrop then acrylic.Backdrop.Destroy()acrylic.Backdrop.Add=function()end acrylic.Backdrop.Remove=function()end acrylic.Backdrop.Refresh=function()end end local dark=environment.__SXLG6 if type(dark)=="table"then if dark.Windows then dark.Windows.Destroy()end if dark.Backdrop then dark.Backdrop.Destroy()dark.Backdrop.Add=function()end dark.Backdrop.Remove=function()end dark.Backdrop.Refresh=function()end end end local oldBlur=game:GetService("Lighting"):FindFirstChild("__VIPGlass_Blur")if oldBlur then oldBlur:Destroy()end if not environment.__SXLG7 then environment.__SXLG7=(function()local nativeInstance=Instance local nativeLoadString=loadstring local nativeGetEnvironment=getfenv local nativeSetEnvironment=setfenv local scheduler=task local TweenService=game:GetService("TweenService")local Lighting=game:GetService("Lighting")local Glass={Version="VIPUNIV-NativePanelGlass-7.0",primaryColor=Color3.fromRGB(70,130,255),accentColor=Color3.fromRGB(100,200,255),bgColor=Color3.fromRGB(43,62,91),buttonColor=Color3.fromRGB(219,232,255),sectionColor=Color3.fromRGB(219,232,255),textColor=Color3.fromRGB(255,255,255),panelTransparency=0.48,cardTransparency=0.88,panelRadius=22,cardRadius=7,}local prefix="__VIPGlass_"local roots={}local objects=setmetatable({},{__mode="k"})local environmentCache=setmetatable({},{__mode="k"})local refreshQueued=false local styleObject,queueObject,refreshBlur local paintProperties={BackgroundColor3=true,BackgroundTransparency=true,BorderSizePixel=true,Font=true,TextColor3=true,TextStrokeTransparency=true,PlaceholderColor3=true,ImageColor3=true,ImageTransparency=true,ScrollBarImageColor3=true,AutoButtonColor=true,TextYAlignment=true,}local function own(object)return object.Name:sub(1,#prefix)==prefix end local function put(record,property,value)if not paintProperties[property]then return end record.output[property]=value if record.object[property]~=value then record.object[property]=value end end local function floatingSurface(object,root)if not object:IsA("GuiButton")and not object:IsA("Frame")then return false end local width,height local size=object.Size width=size.X.Scale==0 and size.X.Offset or object.AbsoluteSize.X height=size.Y.Scale==0 and size.Y.Offset or object.AbsoluteSize.Y if width<24 or height<24 or width>110 or height>110 then return false end if width/height<0.55 or width/height>1.8 then return false end if object:IsA("Frame")then local name=object.Name:lower()local named=name:find("float",1,true)or name:find("minimiz",1,true)or name:find("restore",1,true)if not named then local covered=false for _,child in ipairs(object:GetChildren())do if child:IsA("GuiButton")and child.Size.X.Scale>=0.9 and child.Size.Y.Scale>=0.9 then covered=true end end if not covered then return false end end end local parent=object.Parent while parent and parent~=root do if parent:IsA("GuiObject")then local state=objects[parent]local alpha=state and state.source.BackgroundTransparency or parent.BackgroundTransparency if alpha<1 then return false end end parent=parent.Parent end return parent==root end local function insideFloating(object,root)local parent=object.Parent while parent and parent~=root do local record=objects[parent]if record and record.floating then return true end parent=parent.Parent end return false end local function namedChild(object,class,name)local child=object:FindFirstChild(name)if not child then child=nativeInstance.new(class)child.Name=name child.Parent=object end return child end local function gradient(object,name,rotation,colors,alpha)local existing=object:FindFirstChild(prefix..name)if existing then return existing end local fill=namedChild(object,"UIGradient",prefix..name)fill.Rotation=rotation fill.Color=ColorSequence.new(colors)if alpha then fill.Transparency=NumberSequence.new(alpha)end return fill end local function visible(object,root)if not root.Parent or not root.Enabled then return false end local parent=object while parent and parent~=root do if parent:IsA("GuiObject")and not parent.Visible then return false end if parent:IsA("CanvasGroup")and parent.GroupTransparency>=1 then return false end parent=parent.Parent end return parent==root end local function dimensions(object)local size,absolute=object.Size,object.AbsoluteSize local width=absolute.X>0 and absolute.X or size.X.Offset local height=absolute.Y>0 and absolute.Y or size.Y.Offset return width,height end local function hasLayout(object)return object:FindFirstChildOfClass("UIListLayout")or object:FindFirstChildOfClass("UIGridLayout")or object:FindFirstChildOfClass("UIPageLayout")or object:FindFirstChildOfClass("UITableLayout")end local function skip(object,root)if root:GetAttribute("VIPGlassIgnore")then return true end local rootName=root.Name:lower()if rootName=="hannsiexther_crosshair"or rootName=="explorerselections"or rootName=="alignindicator"then return true end local current=object while current and current~=root do if current:GetAttribute("VIPGlassIgnore")or current:IsA("ViewportFrame")or current:IsA("BillboardGui")or current:IsA("SurfaceGui")or own(current)then return true end local name=current.Name:lower()if name=="crosshairpreview"or name=="crosshaircanvas"or name=="radarcanvas"or name=="radarmap"or name=="hue"or name=="saturation"or name=="colorwheel"or name=="colorchoice"or name:find("swatch",1,true)or name=="syntaxhighlight"then return true end current=current.Parent end return false end local function saturated(color)local _,saturation,value=color:ToHSV()return saturation>0.32 and value>0.22 end local function statusColor(color)local h,s,v=color:ToHSV()return s>0.4 and v>0.55 and(h<0.17 or(h>0.2 and h<0.48)or h>0.95)end local function hasOpaqueAncestor(object,root)local parent=object.Parent while parent and parent~=root do if parent:IsA("GuiObject")then local record=objects[parent]local alpha=record and record.source.BackgroundTransparency or parent.BackgroundTransparency if alpha<1 then return true end end parent=parent.Parent end return false end local function integratedBarFill(record)local object,parent=record.object,record.object.Parent if not object:IsA("Frame")or not parent or not parent:IsA("GuiObject")or hasLayout(parent)or record.source.BackgroundTransparency>=1 then return false end for _,child in ipairs(object:GetChildren())do if child:IsA("GuiObject")and not own(child)then return false end end local name,parentName=object.Name:lower(),parent.Name:lower()local header=parentName:find("header",1,true)or parentName:find("title",1,true)or parentName:find("topbar",1,true)if not header and not name:find("mask",1,true)and not name:find("fix",1,true)then return false end local w,h=dimensions(object)local pw,ph=dimensions(parent)if ph<=0 or w<pw*0.9 or h>ph*0.75 then return false end local source=objects[parent]and objects[parent].source local color=source and source.BackgroundColor3 or parent.BackgroundColor3 local ownColor=record.source.BackgroundColor3 return math.abs(color.R-ownColor.R)<0.025 and math.abs(color.G-ownColor.G)<0.025 and math.abs(color.B-ownColor.B)<0.025 end local function alignBar(record,height)local object=record.object if height>64 or object.TextWrapped or object.Text:find("\n",1,true)or record.source.Font==Enum.Font.Code or record.source.Font==Enum.Font.RobotoMono then return end local name,parentName=object.Name:lower(),object.Parent.Name:lower()if not object:IsA("GuiButton")and not object:IsA("TextBox")and not name:find("title",1,true)and not parentName:find("header",1,true)and not parentName:find("title",1,true)and parentName~="topbar"then return end put(record,"TextYAlignment",Enum.TextYAlignment.Center)local padding=object:FindFirstChildOfClass("UIPadding")if padding and padding.PaddingTop.Scale==0 and padding.PaddingBottom.Scale==0 then local middle=(padding.PaddingTop.Offset+padding.PaddingBottom.Offset)/2 padding.PaddingTop,padding.PaddingBottom=UDim.new(0,middle),UDim.new(0,middle)end end local function windowTransition(object,root)local current=object while current and current~=root do local record=objects[current]if record and record.windowOpening then return true end current=current.Parent end return false end function Glass.surface(object,transparency,radius,edge)object.BackgroundTransparency=transparency object.BorderSizePixel=0 local corner=object:FindFirstChildOfClass("UICorner")if not corner then corner=namedChild(object,"UICorner",prefix.."Corner")end corner.CornerRadius=UDim.new(0,radius)local stroke=namedChild(object,"UIStroke",prefix.."Edge")stroke.Enabled=true stroke.ApplyStrokeMode=Enum.ApplyStrokeMode.Border stroke.Color=Glass.primaryColor stroke.Thickness=radius>=14 and 0.8 or 0.55 stroke.Transparency=edge or 0.78 gradient(stroke,"GlassEdge",125,{ColorSequenceKeypoint.new(0,Color3.fromRGB(133,184,255)),ColorSequenceKeypoint.new(0.35,Glass.primaryColor),ColorSequenceKeypoint.new(0.75,Color3.fromRGB(55,108,211)),ColorSequenceKeypoint.new(1,Color3.fromRGB(139,194,255)),},{NumberSequenceKeypoint.new(0,0),NumberSequenceKeypoint.new(0.38,0.36),NumberSequenceKeypoint.new(0.72,0.78),NumberSequenceKeypoint.new(1,0.12),})end local function fill(record,panel)local object=record.object for _,child in ipairs(object:GetChildren())do if child:IsA("UIGradient")and not own(child)then child.Enabled=false end end local tint if panel then tint=gradient(object,"GlassTint",100,{ColorSequenceKeypoint.new(0,Color3.fromRGB(230,244,255)),ColorSequenceKeypoint.new(0.42,Color3.fromRGB(148,185,233)),ColorSequenceKeypoint.new(1,Color3.fromRGB(209,231,255)),})else tint=gradient(object,"GlassFill",105,{ColorSequenceKeypoint.new(0,Color3.fromRGB(255,255,255)),ColorSequenceKeypoint.new(0.48,Color3.fromRGB(183,207,243)),ColorSequenceKeypoint.new(1,Color3.fromRGB(235,244,255)),})end tint.Enabled=true return tint end local function clearSurface(record)local object=record.object for _,name in ipairs({"Edge","GlassTint","GlassFill"})do local child=object:FindFirstChild(prefix..name)if child then child.Enabled=false end end end local function paintFloating(record)local object=record.object clearSurface(record)put(record,"BackgroundColor3",Color3.fromRGB(240,244,250))put(record,"BackgroundTransparency",record.hovering and 0.8 or 0.86)local corner=object:FindFirstChildOfClass("UICorner")if not corner then corner=namedChild(object,"UICorner",prefix.."Corner")end corner.CornerRadius=UDim.new(1,0)local edge=namedChild(object,"UIStroke",prefix.."Edge")edge.Enabled=true edge.ApplyStrokeMode=Enum.ApplyStrokeMode.Border edge.Color=Color3.fromRGB(245,248,255)edge.Thickness=1 edge.Transparency=0.78 for _,child in ipairs(edge:GetChildren())do if child:IsA("UIGradient")then child.Enabled=false end end for _,child in ipairs(object:GetChildren())do if child:IsA("UIGradient")then child.Enabled=false end if child:IsA("UIStroke")and child~=edge then child.Enabled=false end end if object:IsA("TextButton")then put(record,"TextColor3",Glass.textColor)end end local function stopMotion(record,destroy)record.motionToken=(record.motionToken or 0)+1 record.motionRunning=false if record.motionConnection then record.motionConnection:Disconnect();record.motionConnection=nil end if record.motionTween then record.motionTween:Cancel();record.motionTween=nil end if record.motionDelay and scheduler.cancel then pcall(scheduler.cancel,record.motionDelay)end record.motionDelay=nil if record.motionLayer then record.motionLayer.Visible=false if destroy then record.motionLayer:Destroy();record.motionLayer=nil end elseif record.motionGradient then record.motionGradient.Offset=Vector2.new(0,0)if destroy and record.restTint then record.motionGradient.Color=record.restTint record.motionGradient.Rotation=record.restRotation end end if destroy then record.motionGradient=nil;record.restTint=nil;record.motionMode=nil end end local function syncMotion(record)local object=record.object if record.dead or not record.panel or not object.Parent then stopMotion(record,true);return end local mode=hasLayout(object)and"tint"or"sheen"if record.motionMode and record.motionMode~=mode then stopMotion(record,true)end if not record.motionGradient then record.motionMode=mode if mode=="sheen"then local layer=nativeInstance.new("Frame")layer.Name=prefix.."LiquidSheen"layer.Active=false layer.Selectable=false pcall(function()layer.Interactable=false end)layer.BackgroundColor3=Color3.fromRGB(178,219,255)layer.BackgroundTransparency=0.95 layer.BorderSizePixel=0 layer.Position=UDim2.fromOffset(0,0)layer.Size=UDim2.fromScale(1,1)layer.ZIndex=object.ZIndex local corner=namedChild(layer,"UICorner",prefix.."SheenCorner")corner.CornerRadius=UDim.new(0,Glass.panelRadius)local shine=gradient(layer,"SheenFade",-12,{ColorSequenceKeypoint.new(0,Glass.textColor),ColorSequenceKeypoint.new(1,Glass.textColor),},{NumberSequenceKeypoint.new(0,1),NumberSequenceKeypoint.new(0.40,1),NumberSequenceKeypoint.new(0.47,0.18),NumberSequenceKeypoint.new(0.53,0.18),NumberSequenceKeypoint.new(0.60,1),NumberSequenceKeypoint.new(1,1),})layer.Parent=object record.motionLayer,record.motionGradient=layer,shine else local tint=object:FindFirstChild(prefix.."GlassTint")if not tint then return end record.restTint=tint.Color record.restRotation=tint.Rotation tint.Rotation=-12 tint.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(148,185,233)),ColorSequenceKeypoint.new(0.40,Color3.fromRGB(148,185,233)),ColorSequenceKeypoint.new(0.48,Color3.fromRGB(230,244,255)),ColorSequenceKeypoint.new(0.52,Color3.fromRGB(230,244,255)),ColorSequenceKeypoint.new(0.60,Color3.fromRGB(148,185,233)),ColorSequenceKeypoint.new(1,Color3.fromRGB(148,185,233)),})record.motionGradient=tint end end if not visible(object,record.root)then stopMotion(record,false);return end if record.motionLayer then record.motionLayer.Visible=true end if record.motionRunning then return end record.motionRunning=true record.motionToken=(record.motionToken or 0)+1 local token=record.motionToken local function sweep()record.motionDelay=nil if record.dead or record.motionToken~=token or not visible(object,record.root)then return end local shine=record.motionGradient shine.Offset=Vector2.new(-1,0)local tween=TweenService:Create(shine,TweenInfo.new(1.7,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{Offset=Vector2.new(1,0)})record.motionTween=tween record.motionConnection=tween.Completed:Connect(function(state)if record.motionConnection then record.motionConnection:Disconnect();record.motionConnection=nil end if record.dead or record.motionToken~=token or state~=Enum.PlaybackState.Completed then return end record.motionTween=nil record.motionDelay=scheduler.delay(7,sweep)end)tween:Play()end sweep()end Glass.Backdrop=(function()local Backdrop={}local entries={}local lastError,warned local function eligible(record)if record.dead or not record.panel or not visible(record.object,record.root)then return false end local size,screen=Glass.Read(record.object,"AbsoluteSize"),record.root.AbsoluteSize if size.X<2 or size.Y<28 then return false end return not(size.X>=screen.X*0.9 and size.Y>=screen.Y*0.9)end local function create(entry)if entry.attempted then return end entry.attempted=true local blur local ok,message=pcall(function()blur=nativeInstance.new("UIBlur")blur.Name=prefix.."PanelBackdropV7"blur.Enabled=false blur.Color=Color3.new(1,1,1)blur.Strength=Enum.UIBlurStrength.Heavy blur.Transparency=0 blur.Parent=entry.record.object end)if ok then entry.component=blur;lastError=nil else if blur then blur:Destroy()end lastError=tostring(message)if not warned then warned=true warn("SIEXTHER: UIBlur lokal belum didukung klien ini. Tema kaca tetap aktif; tidak ada blur kamera pengganti.")end end end function Backdrop.Add(record)if not entries[record]then entries[record]={record=record}end end function Backdrop.Remove(record)local entry=entries[record]if entry and entry.component then entry.component:Destroy()end entries[record]=nil end function Backdrop.Refresh(active)for _,entry in pairs(entries)do local shown=active and eligible(entry.record)if entry.component and entry.component.Parent~=entry.record.object then entry.component:Destroy()entry.component,entry.attempted=nil,nil end if shown then create(entry)end local component=entry.component if component then component.Enabled=shown end end end function Backdrop.Destroy()local records={}for record in pairs(entries)do records[#records+1]=record end for _,record in ipairs(records)do Backdrop.Remove(record)end end function Backdrop.Status()local panels,configured,active=0,0,0 for _,entry in pairs(entries)do panels=panels+1 if entry.component then configured=configured+1 if entry.component.Enabled then active=active+1 end end end return{Backend="native-panel-only",Panels=panels,Configured=configured,Active=active,LastError=lastError,RenderingVerified=false,CameraEffects=false}end return Backdrop end)()Glass.Windows=(function()local WindowFX={}local ghosts={}local function totalScale(object)local result,current=1,object while current and current:IsA("GuiObject")do local scale=current:FindFirstChildOfClass("UIScale")if scale then result=result*scale.Scale end current=current.Parent end return math.max(result,0.001)end local function clearGhost(record)local ghost=record.windowGhost if not ghost then return end record.windowGhost=nil ghosts[ghost]=nil if ghost.connection then ghost.connection:Disconnect()end for _,tween in ipairs(ghost.tweens or{})do tween:Cancel()end ghost.gui:Destroy()end function WindowFX.Stop(record)local motion=record.windowOpening if not motion then return end record.windowOpening=nil if motion.connection then motion.connection:Disconnect()end for _,tween in ipairs(motion.tweens)do tween:Cancel()end if record.object.Parent then record.object.Position=motion.rest end if motion.created then motion.scale:Destroy()elseif motion.scale.Parent then motion.scale.Scale=motion.base end end local function snapshot(record)local object,root=record.object,record.root if not object.Parent or not root.Parent or object.AbsoluteSize.X<2 or object.AbsoluteSize.Y<2 then return end local clone local archivable=object.Archivable local ok=pcall(function()object.Archivable=true clone=object:Clone()end)object.Archivable=archivable if not ok or not clone then return end local position,size=object.AbsolutePosition,object.AbsoluteSize local scale=totalScale(object)local origin=root.AbsolutePosition local gui=nativeInstance.new("ScreenGui")gui.Name=prefix.."ClosingWindow"gui.ResetOnSpawn=false gui.IgnoreGuiInset=root.IgnoreGuiInset pcall(function()gui.ScreenInsets=root.ScreenInsets gui.ClipToDeviceSafeArea=root.ClipToDeviceSafeArea gui.SafeAreaCompatibility=root.SafeAreaCompatibility end)gui.ZIndexBehavior=root.ZIndexBehavior gui.DisplayOrder=root.DisplayOrder+1 local group=nativeInstance.new("CanvasGroup")group.Name=prefix.."ClosingVisual"group.BackgroundTransparency=1 group.BorderSizePixel=0 group.Active,group.Selectable=false,false pcall(function()group.Interactable=false end)group.AnchorPoint=Vector2.new(0.5,0.5)group.Position=UDim2.fromOffset(position.X-origin.X+size.X/2,position.Y-origin.Y+size.Y/2)group.Size=UDim2.fromOffset(size.X/scale,size.Y/scale)group.GroupTransparency=0 local spring=nativeInstance.new("UIScale")spring.Name=prefix.."ClosingScale"spring.Scale=scale spring.Parent=group local ownScale=clone:FindFirstChildOfClass("UIScale")if ownScale then ownScale:Destroy()end clone.Name=prefix.."ClosingPanel"clone.AnchorPoint=Vector2.new(0,0)clone.Position=UDim2.fromOffset(0,0)clone.Size=UDim2.fromScale(1,1)clone.Visible=true clone.Active,clone.Selectable=false,false pcall(function()clone.Interactable=false end)for _,child in ipairs(clone:GetDescendants())do if child:IsA("LuaSourceContainer")then child:Destroy()elseif child:IsA("GuiObject")then child.Active,child.Selectable=false,false pcall(function()child.Interactable=false end)if child:IsA("ScrollingFrame")then child.ScrollingEnabled=false end end end clone.Parent=group group.Parent=gui gui.Parent=root.Parent return gui,group,spring,scale end function WindowFX.Close(record)if record.windowGhost or not record.windowShown then return end record.windowShown=false local gui,group,spring,scale=snapshot(record)WindowFX.Stop(record)if not gui then return end local position=group.Position local fade=TweenService:Create(group,TweenInfo.new(0.26,Enum.EasingStyle.Quart,Enum.EasingDirection.In),{GroupTransparency=1,Position=UDim2.new(position.X.Scale,position.X.Offset,position.Y.Scale,position.Y.Offset+12),})local shrink=TweenService:Create(spring,TweenInfo.new(0.26,Enum.EasingStyle.Quart,Enum.EasingDirection.In),{Scale=scale*0.88})local ghost={gui=gui,tweens={fade,shrink},record=record}record.windowGhost=ghost ghosts[ghost]=true ghost.connection=fade.Completed:Connect(function(state)if state==Enum.PlaybackState.Completed and record.windowGhost==ghost then clearGhost(record)end end)shrink:Play()fade:Play()end local function open(record)clearGhost(record)WindowFX.Stop(record)local object=record.object local state=roots[record.root]if state then for _,child in pairs(state.panels)do if child~=record and child.object:IsDescendantOf(object)then WindowFX.Stop(child)end end end local scale=object:FindFirstChildOfClass("UIScale")local created=not scale if not scale then scale=nativeInstance.new("UIScale")scale.Name=prefix.."WindowSpring"scale.Parent=object end local base,rest=scale.Scale,object.Position local motion={scale=scale,base=base,rest=rest,created=created,tweens={}}record.windowOpening=motion object.Position=UDim2.new(rest.X.Scale,rest.X.Offset,rest.Y.Scale,rest.Y.Offset+18)scale.Scale=base*0.84 local position=TweenService:Create(object,TweenInfo.new(0.44,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),{Position=rest})local spring=TweenService:Create(scale,TweenInfo.new(0.46,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Scale=base})motion.tweens={position,spring}motion.connection=spring.Completed:Connect(function(state)if state==Enum.PlaybackState.Completed and record.windowOpening==motion then WindowFX.Stop(record)end end)position:Play()spring:Play()end function WindowFX.Sync(record)if record.dead or not record.panel then return end local shown=visible(record.object,record.root)if shown==record.windowShown then return end if shown then record.windowShown=true if not windowTransition(record.object.Parent,record.root)then open(record)end else WindowFX.Close(record)end end function WindowFX.CloseTree(state,object)if not state then return end local function included(record)return not object or record.object==object or record.object:IsDescendantOf(object)end local top={}for _,record in pairs(state.panels)do if record.windowShown and included(record)then local parent,bundled=record.object.Parent,false while parent and parent~=record.root do local ancestor=state.panels[parent]if ancestor and ancestor.windowShown and included(ancestor)then bundled=true;break end parent=parent.Parent end if bundled then record.windowShown=false WindowFX.Stop(record)clearGhost(record)else top[#top+1]=record end end end for _,record in ipairs(top)do WindowFX.Close(record)end end function WindowFX.Forget(record)WindowFX.Stop(record)record.windowShown=false end function WindowFX.Geometry(object,property)local record=objects[object]if not record then return end local current=object while current and current~=record.root do local owner=objects[current]local motion=owner and owner.windowOpening if motion then local factor=motion.scale.Scale/math.max(motion.base,0.001)if factor<=0 then return end local size=object.AbsoluteSize if property=="AbsoluteSize"then return Vector2.new(size.X/factor,size.Y/factor)end local window,parent=owner.object,owner.object.Parent local p,area=parent.AbsolutePosition,parent.AbsoluteSize local parentScale=totalScale(parent)local rest,windowSize=motion.rest,window.AbsoluteSize local x=p.X+area.X*rest.X.Scale+rest.X.Offset*parentScale-windowSize.X/factor*window.AnchorPoint.X local y=p.Y+area.Y*rest.Y.Scale+rest.Y.Offset*parentScale-windowSize.Y/factor*window.AnchorPoint.Y local a,b=object.AbsolutePosition,window.AbsolutePosition return Vector2.new(x+(a.X-b.X)/factor,y+(a.Y-b.Y)/factor)end current=current.Parent end end function WindowFX.Destroy()local records={}for ghost in pairs(ghosts)do records[#records+1]=ghost.record end for _,record in ipairs(records)do clearGhost(record)end end return WindowFX end)()local function setPanel(record,isPanel)record.panel=isPanel record.backdrop=isPanel local state=roots[record.root]if state then state.panels[record.object]=isPanel and record or nil end if isPanel then Glass.Backdrop.Add(record)else Glass.Backdrop.Remove(record);stopMotion(record,true);Glass.Windows.Forget(record)end end local function watch(record,signal,callback)record.connections[#record.connections+1]=signal:Connect(callback)end local function dispose(record)if record.dead then return end record.dead=true for _,connection in ipairs(record.connections)do connection:Disconnect()end record.connections={}Glass.Windows.Stop(record)stopMotion(record,true)Glass.Backdrop.Remove(record)objects[record.object]=nil local root=roots[record.root]if root then root.objects[record.object]=nil;root.panels[record.object]=nil end end styleObject=function(record)local object,root=record.object,record.root if record.dead or not object.Parent or not object:IsDescendantOf(root)or skip(object,root)then if record.panel then setPanel(record,false)end return end local source=record.source local width,height=dimensions(object)local logicalHeight=object.Size.Y.Scale==0 and object.Size.Y.Offset or height local name=object.Name:lower()local text=object:IsA("TextLabel")or object:IsA("TextButton")or object:IsA("TextBox")local image=object:IsA("ImageLabel")or object:IsA("ImageButton")local button=object:IsA("GuiButton")local imageSurface=image and logicalHeight>=48 and object.Image~=""and not name:find("shadow",1,true)and not name:find("glow",1,true)and(object.ScaleType==Enum.ScaleType.Slice or name=="main"or name=="window"or name=="background"or name=="mainframe")record.writing=true put(record,"BorderSizePixel",0)if text then if source.Font~=Enum.Font.Code and source.Font~=Enum.Font.RobotoMono then put(record,"Font",Enum.Font.GothamBold)end put(record,"TextColor3",statusColor(source.TextColor3)and source.TextColor3 or Glass.textColor)put(record,"TextStrokeTransparency",1)alignBar(record,logicalHeight)if object:IsA("TextBox")then put(record,"PlaceholderColor3",Color3.fromRGB(180,191,210))end for _,child in ipairs(object:GetChildren())do if child:IsA("UIGradient")and not own(child)then child.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Glass.textColor),ColorSequenceKeypoint.new(0.3,Glass.primaryColor),ColorSequenceKeypoint.new(0.6,Glass.primaryColor),ColorSequenceKeypoint.new(1,Glass.textColor),})end end end if object:IsA("ScrollingFrame")then put(record,"ScrollBarImageColor3",Glass.primaryColor)end if button then put(record,"AutoButtonColor",false)end if integratedBarFill(record)then setPanel(record,false)clearSurface(record)put(record,"BackgroundTransparency",1)for _,child in ipairs(object:GetChildren())do if child:IsA("UIStroke")then child.Enabled=false end end record.writing=false return end if insideFloating(object,root)then setPanel(record,false)clearSurface(record)put(record,"BackgroundTransparency",1)if text then put(record,"TextColor3",Glass.textColor)end for _,child in ipairs(object:GetChildren())do if child:IsA("UIStroke")then child.Enabled=false end end record.writing=false return end local wasFloating=record.floating record.floating=source.BackgroundTransparency<1 and floatingSurface(object,root)if wasFloating~=record.floating then for _,child in ipairs(object:GetChildren())do if child:IsA("GuiObject")then queueObject(root,child)end end end if record.floating then setPanel(record,false)paintFloating(record)record.writing=false return end if image and object.Image~=""and not imageSurface then setPanel(record,false)if source.BackgroundTransparency<1 then put(record,"BackgroundColor3",Glass.buttonColor)put(record,"BackgroundTransparency",Glass.cardTransparency)record.output.BackgroundTransparency=Glass.cardTransparency Glass.surface(object,Glass.cardTransparency,Glass.cardRadius,0.76)end record.writing=false return end local transparent=not imageSurface and source.BackgroundTransparency>=1 local compact=object.Size.Y.Scale==0 and height>0 and height<=10 local knob=name:find("knob",1,true)or name:find("dragger",1,true)or name:find("thumb",1,true)or name=="toggleindicator"local track=(name:find("switch",1,true)or name:find("toggle",1,true))and width<=70 and height<=30 if not track and button and text and object.Text==""and width>22 and width<=65 and height>12 and height<=28 and#object:GetChildren()>0 then track=true end local panel=not transparent and(object:IsA("Frame")or object:IsA("CanvasGroup")or imageSurface)and not object:IsA("ScrollingFrame")and not compact and not knob and not track and(((not hasOpaqueAncestor(object,root))and(logicalHeight>=48 or object.Size.Y.Scale>0))or((name:find("popup",1,true)or name:find("modal",1,true)or name=="mainframe"or name=="window")and logicalHeight>=48))if imageSurface then put(record,"ImageTransparency",1)end setPanel(record,panel)if transparent then clearSurface(record)put(record,"BackgroundTransparency",1)elseif compact or knob or track then clearSurface(record)local active=saturated(source.BackgroundColor3)local color=knob and Glass.textColor or(active and Glass.primaryColor or Color3.fromRGB(176,189,211))local alpha=knob and 0 or(track and(active and 0.08 or 0.7)or(active and 0 or 0.8))put(record,"BackgroundColor3",color)put(record,"BackgroundTransparency",alpha)local corner=object:FindFirstChildOfClass("UICorner")if corner then corner.CornerRadius=UDim.new(1,0)end else local active=not panel and button and saturated(source.BackgroundColor3)local section=not panel and(name:find("sidebar",1,true)or name:find("header",1,true)or name=="topbar"or name=="titlebar"or name=="sxthr")local search=object:IsA("TextBox")or name:find("search",1,true)local alpha=panel and Glass.panelTransparency or(active and 0.28 or(section and 0.94 or(search and 0.9 or Glass.cardTransparency)))local color=panel and Glass.bgColor or(active and Glass.primaryColor or(section and Glass.sectionColor or Glass.buttonColor))put(record,"BackgroundColor3",color)put(record,"BackgroundTransparency",record.hovering and not panel and math.min(alpha,0.84)or alpha)local actualAlpha=record.output.BackgroundTransparency Glass.surface(object,actualAlpha,panel and Glass.panelRadius or Glass.cardRadius,panel and 0.36 or 0.76)record.output.BackgroundTransparency=actualAlpha fill(record,panel)end for _,child in ipairs(object:GetChildren())do if child:IsA("UIStroke")and not own(child)then child.Enabled=false end end record.writing=false if panel then syncMotion(record);Glass.Windows.Sync(record)end end queueObject=function(root,object)local state=roots[root]if not state or state.dead or own(object)then return end if not object:IsA("GuiObject")then if object.Parent and object.Parent:IsA("GuiObject")then queueObject(root,object.Parent)end return end if skip(object,root)then return end local record=objects[object]if record and record.root~=root then dispose(record);record=nil end if not record then state.serial=state.serial+1 record={object=object,root=root,source={},output={},connections={},id=state.serial}objects[object]=record state.objects[object]=record local properties={"BackgroundColor3","BackgroundTransparency","BorderSizePixel"}if object:IsA("TextLabel")or object:IsA("TextBox")or object:IsA("TextButton")then for _,property in ipairs({"TextColor3","Font","TextStrokeTransparency","TextYAlignment"})do properties[#properties+1]=property end end if object:IsA("ScrollingFrame")then properties[#properties+1]="ScrollBarImageColor3"properties[#properties+1]="ScrollBarThickness"end for _,property in ipairs(properties)do record.source[property]=object[property]watch(record,object:GetPropertyChangedSignal(property),function()if record.dead or record.writing or object[property]==record.output[property]then return end record.source[property]=object[property]queueObject(root,object)end)end for _,property in ipairs({"Visible","Size","AbsoluteSize","ClipsDescendants","Name"})do watch(record,object:GetPropertyChangedSignal(property),function()if not record.dead then if property=="AbsoluteSize"and windowTransition(object,root)then return end if property=="Visible"then if object.Visible then Glass.Windows.Sync(record)else Glass.Windows.CloseTree(roots[root],object)end end queueObject(root,object);refreshBlur()end end)end for _,property in ipairs({"Position","AnchorPoint"})do watch(record,object:GetPropertyChangedSignal(property),function()if not record.dead and record.panel then refreshBlur()end end)end if object:IsA("CanvasGroup")then watch(record,object:GetPropertyChangedSignal("GroupTransparency"),refreshBlur)end watch(record,object.Destroying,function()if record.panel then Glass.Windows.CloseTree(roots[root],object)end dispose(record);refreshBlur()end)if object:IsA("GuiButton")then watch(record,object.MouseEnter,function()record.hovering=true;queueObject(root,object)end)watch(record,object.MouseLeave,function()record.hovering=false;queueObject(root,object)end)end end state.pending[object]=record if state.queued then return end state.queued=true scheduler.defer(function()if state.dead then return end state.queued=false local pending=state.pending state.pending={}local count=0 for _,item in pairs(pending)do if not item.dead then styleObject(item)end count=count+1 if count%80==0 then scheduler.wait()end end refreshBlur()end)end refreshBlur=function()if refreshQueued then return end refreshQueued=true scheduler.defer(function()refreshQueued=false local active,any=false,false for root,state in pairs(roots)do if not state.dead then any=true for _,record in pairs(state.panels)do if record.backdrop and not record.dead then Glass.Windows.Sync(record)syncMotion(record)local _,height=dimensions(record.object)local shown=visible(record.object,root)local actual=record.object.AbsoluteSize if shown and actual.X>=2 and actual.Y>=28 then active=true end end end end end Glass.Backdrop.Refresh(active)if not any then Glass.Backdrop.Destroy()end end)end function Glass.attach(root)if not root:IsA("ScreenGui")or roots[root]then return root end local state={objects={},panels={},pending={},connections={},serial=0}roots[root]=state local function connect(signal,callback)state.connections[#state.connections+1]=signal:Connect(callback)end local function scan()if state.dead then return end for _,object in ipairs(root:GetDescendants())do if not own(object)then queueObject(root,object)end end refreshBlur()end connect(root.DescendantAdded,function(object)queueObject(root,object)end)connect(root.DescendantRemoving,function(object)local record=objects[object]if record and record.root==root then scheduler.defer(function()if not record.dead and not object:IsDescendantOf(root)then dispose(record);refreshBlur()end end)end end)connect(root:GetPropertyChangedSignal("Enabled"),function()if root.Enabled then for _,record in pairs(state.panels)do Glass.Windows.Sync(record)end else Glass.Windows.CloseTree(state)end refreshBlur()end)connect(root:GetPropertyChangedSignal("Name"),scan)connect(root:GetPropertyChangedSignal("AbsoluteSize"),refreshBlur)connect(root.AncestryChanged,refreshBlur)connect(root.Destroying,function()Glass.Windows.CloseTree(state)state.dead=true for _,connection in ipairs(state.connections)do connection:Disconnect()end local toRemove={}for _,record in pairs(state.objects)do toRemove[#toRemove+1]=record end for _,record in ipairs(toRemove)do dispose(record)end roots[root]=nil refreshBlur()end)scheduler.defer(scan)return root end function Glass.Destroy(object)local state=roots[object]if state then Glass.Windows.CloseTree(state)else local record=objects[object]if record then local root=roots[record.root]if root then Glass.Windows.CloseTree(root,object)end end end return object:Destroy()end Glass.Instance=setmetatable({},{__index=nativeInstance})function Glass.Instance.new(class,parent)local object=nativeInstance.new(class)if class=="ScreenGui"then Glass.attach(object)end if parent then object.Parent=parent end return object end local function environmentFor(base)base=base or _G local cached=environmentCache[base]if cached then return cached end local wrapped=setmetatable({},{__index=function(_,key)if key=="Instance"then return Glass.Instance end if key=="loadstring"then return Glass.LoadString end if key=="getfenv"then return Glass.GetEnvironment end return base[key]end,__newindex=function(_,key,value)base[key]=value end,})environmentCache[base]=wrapped environmentCache[wrapped]=wrapped return wrapped end function Glass.GetEnvironment(level)local base if nativeGetEnvironment then if level==nil then base=nativeGetEnvironment(2)elseif type(level)=="number"then base=nativeGetEnvironment(level==0 and 0 or level+1)else base=nativeGetEnvironment(level)end end return environmentFor(base)end function Glass.LoadString(source,chunkName)local compiled,message=nativeLoadString(source,chunkName)if compiled and nativeSetEnvironment then local base=nativeGetEnvironment and nativeGetEnvironment(compiled)or _G nativeSetEnvironment(compiled,environmentFor(base))end return compiled,message end function Glass.Read(object,property)local record=objects[object]if property=="AbsoluteSize"or property=="AbsolutePosition"then local geometry=Glass.Windows.Geometry(object,property)if geometry then return geometry end end if record and record.source[property]~=nil and object[property]==record.output[property]then return record.source[property]end return object[property]end return Glass end)()end __SXLG7=environment.__SXLG7 end local Screen=setmetatable({},{__index=function(_,key)local cam=workspace.CurrentCamera local size=cam and cam.ViewportSize or Vector2.new(1920,1080)if key=="Width"then return size.X elseif key=="Height"then return size.Y elseif key=="Size"then return size end end})function scale(axis,value)if axis=="X"then return value*(Screen.Width/1920)*1.5 elseif axis=="Y"then return value*(Screen.Height/1080)*1.5 end end function missing(t,f,fallback)if type(f)==t then return f end return fallback end cloneref=missing("function",cloneref,function(...)return...end)local Services=setmetatable({},{__index=function(_,name)return cloneref(game:GetService(name))end})local Players=Services.Players local RunService=Services.RunService local UserInputService=Services.UserInputService local TweenService=Services.TweenService local AvatarEditorService=Services.AvatarEditorService local HttpService=Services.HttpService local player=Players.LocalPlayer local character=player.Character or player.CharacterAdded:Wait()local humanoid=character:WaitForChild("Humanoid")local lastPosition=character.PrimaryPart and character.PrimaryPart.Position or Vector3.new()player.CharacterAdded:Connect(function(newCharacter)character=newCharacter humanoid=newCharacter:WaitForChild("Humanoid")lastPosition=character.PrimaryPart and character.PrimaryPart.Position or Vector3.new()end)local Settings=_G Settings["Stop On Move"]=false Settings["Fade In"]=0.1 Settings["Fade Out"]=0.1 Settings["Weight"]=1 Settings["Speed"]=1 Settings["Allow Invisible"]=true Settings["Time Position"]=0 local savedEmotes={}local SAVE_FILE="SiextherEmote.json"local function loadSavedEmotes()local success,data=pcall(function()if readfile and isfile and isfile(SAVE_FILE)then return HttpService:JSONDecode(readfile(SAVE_FILE))end return{}end)if success then savedEmotes=data else savedEmotes={}end end local function saveEmotesToData()pcall(function()if writefile then writefile(SAVE_FILE,HttpService:JSONEncode(savedEmotes))end end)end loadSavedEmotes()local CurrentTrack=nil local function LoadTrack(id)if CurrentTrack then CurrentTrack:Stop(Settings["Fade Out"])end local animId local ok,result=pcall(function()return game:GetObjects("rbxassetid://"..tostring(id))end)if ok and result and#result>0 then local anim=result[1]if anim:IsA("Animation")then animId=anim.AnimationId else animId="rbxassetid://"..tostring(id)end else animId="rbxassetid://"..tostring(id)end local newAnim=__SXLG7.Instance.new("Animation")newAnim.AnimationId=animId local newTrack=humanoid:LoadAnimation(newAnim)newTrack.Priority=Enum.AnimationPriority.Action4 local weight=Settings["Weight"]if weight==0 then weight=0.001 end newTrack:Play(Settings["Fade In"],weight,Settings["Speed"])CurrentTrack=newTrack CurrentTrack.TimePosition=math.clamp(Settings["Time Position"],0,1)*CurrentTrack.Length return newTrack end RunService.RenderStepped:Connect(function()if character.PrimaryPart then if Settings["Stop On Move"]and CurrentTrack and CurrentTrack.IsPlaying then local moved=(character.PrimaryPart.Position-lastPosition).Magnitude>0.1 local jumped=humanoid and humanoid:GetState()==Enum.HumanoidStateType.Jumping if moved or jumped then CurrentTrack:Stop(Settings["Fade Out"])CurrentTrack=nil end end lastPosition=character.PrimaryPart.Position end end)local CoreGui=Services.CoreGui local gui=__SXLG7.Instance.new("ScreenGui")gui.Name="HannSiexther Emote"gui.Parent=CoreGui gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling local function createGradient(parent,colorSequence)return end local function createCorner(parent,cornerRadius)local corner=__SXLG7.Instance.new("UICorner")corner.CornerRadius=UDim.new(0,cornerRadius)corner.Parent=parent return corner end local function createStroke(parent,thickness,color)local stroke=__SXLG7.Instance.new("UIStroke")stroke.Thickness=thickness or 2 stroke.Color=color or Color3.fromRGB(70,130,255)stroke.ApplyStrokeMode=Enum.ApplyStrokeMode.Border stroke.Parent=parent return stroke end local minimizeBall=__SXLG7.Instance.new("TextButton")minimizeBall.Name="MinimizeBall"minimizeBall.Size=UDim2.new(0,70,0,70)minimizeBall.Position=UDim2.new(0.9,-scale("X",30),0.1,0)minimizeBall.BackgroundColor3=Color3.fromRGB(25,25,35)minimizeBall.Text="💃"minimizeBall.TextSize=20 minimizeBall.Font=Enum.Font.GothamBold minimizeBall.TextColor3=Color3.fromRGB(70,130,255)minimizeBall.Visible=false minimizeBall.Active=true minimizeBall.Draggable=true minimizeBall.Parent=gui minimizeBall.ZIndex=999 createCorner(minimizeBall,12)local mainContainer=__SXLG7.Instance.new("Frame")mainContainer.Size=UDim2.new(0,scale("X",600),0,scale("Y",400))mainContainer.Position=UDim2.new(0.5,-scale("X",300),0.5,-scale("Y",200))mainContainer.BackgroundColor3=Color3.fromRGB(20,20,25)mainContainer.Active=true mainContainer.Draggable=true mainContainer.Parent=gui createCorner(mainContainer,12)createStroke(mainContainer,2,Color3.fromRGB(70,130,255))local originalSize=mainContainer.Size local title=__SXLG7.Instance.new("TextLabel")title.Size=UDim2.new(1,0,0,scale("Y",36))title.BackgroundColor3=Color3.fromRGB(25,25,30)title.Text="SIEXTHER EMOTE"title.TextColor3=Color3.fromRGB(70,130,255)title.Font=Enum.Font.GothamBold title.TextScaled=true title.Parent=mainContainer createCorner(title,8)local closeBtn=__SXLG7.Instance.new("TextButton")closeBtn.Name="CloseButton"closeBtn.Size=UDim2.new(0,scale("X",30),0,scale("Y",30))closeBtn.Position=UDim2.new(1,-scale("X",36),0,scale("Y",3))closeBtn.BackgroundColor3=Color3.fromRGB(180,50,50)closeBtn.TextColor3=Color3.new(1,1,1)closeBtn.TextScaled=true closeBtn.Font=Enum.Font.GothamBold closeBtn.Text="X"closeBtn.Parent=title createCorner(closeBtn,4)local minimizeBtn=__SXLG7.Instance.new("TextButton")minimizeBtn.Name="MinimizeButton"minimizeBtn.Size=UDim2.new(0,scale("X",30),0,scale("Y",30))minimizeBtn.Position=UDim2.new(1,-scale("X",72),0,scale("Y",3))minimizeBtn.BackgroundColor3=Color3.fromRGB(40,40,50)minimizeBtn.TextColor3=Color3.fromRGB(70,130,255)minimizeBtn.TextScaled=true minimizeBtn.Font=Enum.Font.GothamBold minimizeBtn.Text="−"minimizeBtn.Parent=title createCorner(minimizeBtn,4)local isMinimized=false closeBtn.MouseButton1Click:Connect(function()__SXLG7.Destroy(gui)end)minimizeBtn.MouseButton1Click:Connect(function()isMinimized=true mainContainer.Visible=false minimizeBall.Visible=true minimizeBall.Size=UDim2.new(0,0,0,0)local openTween=TweenService:Create(minimizeBall,TweenInfo.new(0.3,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Size=UDim2.new(0,scale("X",60),0,scale("Y",60))})openTween:Play()end)minimizeBall.MouseButton1Click:Connect(function()isMinimized=false local closeTween=TweenService:Create(minimizeBall,TweenInfo.new(0.2,Enum.EasingStyle.Back,Enum.EasingDirection.In),{Size=UDim2.new(0,0,0,0)})closeTween.Completed:Connect(function()minimizeBall.Visible=false mainContainer.Visible=true mainContainer.Size=UDim2.new(0,0,0,0)local expandTween=TweenService:Create(mainContainer,TweenInfo.new(0.3,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Size=originalSize})expandTween:Play()end)closeTween:Play()end)local catalogTabBtn=__SXLG7.Instance.new("TextButton")catalogTabBtn.Size=UDim2.new(0.3,0,0,scale("Y",24))catalogTabBtn.Position=UDim2.new(0.05,0,0,scale("Y",40))catalogTabBtn.BackgroundColor3=Color3.fromRGB(35,35,45)catalogTabBtn.Text="Catalog"catalogTabBtn.TextColor3=Color3.fromRGB(70,130,255)catalogTabBtn.Font=Enum.Font.GothamBold catalogTabBtn.TextScaled=true catalogTabBtn.Parent=mainContainer createCorner(catalogTabBtn,6)createStroke(catalogTabBtn,2,Color3.fromRGB(70,130,255))local savedTabBtn=__SXLG7.Instance.new("TextButton")savedTabBtn.Size=UDim2.new(0.3,0,0,scale("Y",24))savedTabBtn.Position=UDim2.new(0.35,0,0,scale("Y",40))savedTabBtn.BackgroundColor3=Color3.fromRGB(30,30,35)savedTabBtn.Text="Saved"savedTabBtn.TextColor3=Color3.new(0.8,0.8,0.8)savedTabBtn.Font=Enum.Font.GothamBold savedTabBtn.TextScaled=true savedTabBtn.Parent=mainContainer createCorner(savedTabBtn,6)createStroke(savedTabBtn,2,Color3.fromRGB(50,50,60))local divider=__SXLG7.Instance.new("Frame")divider.Size=UDim2.new(0,scale("X",2),1,-scale("Y",70))divider.Position=UDim2.new(0.6,-scale("X",1),0,scale("Y",70))divider.BackgroundColor3=Color3.fromRGB(70,130,255)divider.Parent=mainContainer createCorner(divider,1)local catalogFrame=__SXLG7.Instance.new("Frame")catalogFrame.Size=UDim2.new(0.6,-scale("X",10),1,-scale("Y",70))catalogFrame.Position=UDim2.new(0,scale("X",5),0,scale("Y",70))catalogFrame.BackgroundTransparency=1 catalogFrame.Visible=true catalogFrame.Parent=mainContainer local searchBox=__SXLG7.Instance.new("TextBox")searchBox.Size=UDim2.new(0.6,-scale("X",8),0,scale("Y",28))searchBox.Position=UDim2.new(0,scale("X",8),0,0)searchBox.PlaceholderText="Search..."searchBox.BackgroundColor3=Color3.fromRGB(30,30,35)searchBox.TextColor3=Color3.new(1,1,1)searchBox.Font=Enum.Font.Gotham searchBox.TextScaled=true searchBox.ClearTextOnFocus=false searchBox.Parent=catalogFrame createCorner(searchBox,6)local searchBtn=__SXLG7.Instance.new("TextButton")searchBtn.Size=UDim2.new(0.2,-scale("X",4),0,scale("Y",28))searchBtn.Position=UDim2.new(0.6,scale("X",4),0,0)searchBtn.BackgroundColor3=Color3.fromRGB(40,40,50)searchBtn.Text="Search"searchBtn.Font=Enum.Font.GothamBold searchBtn.TextScaled=true searchBtn.TextColor3=Color3.fromRGB(70,130,255)searchBtn.Parent=catalogFrame createCorner(searchBtn,6)local sortBtn=__SXLG7.Instance.new("TextButton")sortBtn.Size=UDim2.new(0.2,-scale("X",8),0,scale("Y",28))sortBtn.Position=UDim2.new(0.8,scale("X",4),0,0)sortBtn.BackgroundColor3=Color3.fromRGB(40,40,50)sortBtn.Text="Sort: Relevance"sortBtn.Font=Enum.Font.GothamBold sortBtn.TextScaled=true sortBtn.TextColor3=Color3.fromRGB(70,130,255)sortBtn.Parent=catalogFrame createCorner(sortBtn,6)local scroll=__SXLG7.Instance.new("ScrollingFrame")scroll.Size=UDim2.new(1,-scale("X",16),1,-scale("Y",100))scroll.Position=UDim2.new(0,scale("X",8),0,scale("Y",36))scroll.CanvasSize=UDim2.new(0,0,0,0)scroll.ScrollBarThickness=6 scroll.BackgroundTransparency=1 scroll.Parent=catalogFrame local emptyLabel=__SXLG7.Instance.new("TextLabel")emptyLabel.Size=UDim2.new(1,0,0,scale("Y",36))emptyLabel.Position=UDim2.new(0,0,0.5,-scale("Y",18))emptyLabel.BackgroundTransparency=1 emptyLabel.Text="Nothing Silly Here :3 (except me)"emptyLabel.TextColor3=Color3.fromRGB(70,130,255)emptyLabel.Font=Enum.Font.GothamBold emptyLabel.TextScaled=true emptyLabel.Visible=false emptyLabel.Parent=scroll local layout=__SXLG7.Instance.new("UIGridLayout")layout.CellSize=UDim2.new(0,scale("X",120),0,scale("Y",180))layout.CellPadding=UDim2.new(0,scale("X",8),0,scale("Y",8))layout.HorizontalAlignment=Enum.HorizontalAlignment.Center layout.Parent=scroll local prevBtn=__SXLG7.Instance.new("TextButton")prevBtn.Size=UDim2.new(0.4,-scale("X",6),0,scale("Y",32))prevBtn.Position=UDim2.new(0,scale("X",4),1,-scale("Y",36))prevBtn.BackgroundColor3=Color3.fromRGB(40,40,50)prevBtn.Text="< Prev"prevBtn.Font=Enum.Font.GothamBold prevBtn.TextScaled=true prevBtn.TextColor3=Color3.fromRGB(70,130,255)prevBtn.Parent=catalogFrame createCorner(prevBtn,6)local nextBtn=__SXLG7.Instance.new("TextButton")nextBtn.Size=UDim2.new(0.4,-scale("X",6),0,scale("Y",32))nextBtn.Position=UDim2.new(0.6,scale("X",2),1,-scale("Y",36))nextBtn.BackgroundColor3=Color3.fromRGB(40,40,50)nextBtn.Text="Next >"nextBtn.Font=Enum.Font.GothamBold nextBtn.TextScaled=true nextBtn.TextColor3=Color3.fromRGB(70,130,255)nextBtn.Parent=catalogFrame createCorner(nextBtn,6)local pageLabel=__SXLG7.Instance.new("TextLabel")pageLabel.Size=UDim2.new(0.2,0,0,scale("Y",32))pageLabel.Position=UDim2.new(0.4,scale("X",2),1,-scale("Y",36))pageLabel.BackgroundTransparency=1 pageLabel.Font=Enum.Font.Gotham pageLabel.TextScaled=true pageLabel.TextColor3=Color3.fromRGB(70,130,255)pageLabel.Text="Page 1"pageLabel.Parent=catalogFrame local savedFrame=__SXLG7.Instance.new("Frame")savedFrame.Size=UDim2.new(0.6,-scale("X",10),1,-scale("Y",70))savedFrame.Position=UDim2.new(0,scale("X",5),0,scale("Y",70))savedFrame.BackgroundTransparency=1 savedFrame.Visible=false savedFrame.Parent=mainContainer local savedScroll=__SXLG7.Instance.new("ScrollingFrame")savedScroll.Size=UDim2.new(1,-scale("X",16),1,-scale("Y",40))savedScroll.Position=UDim2.new(0,scale("X",8),0,0)savedScroll.CanvasSize=UDim2.new(0,0,0,0)savedScroll.ScrollBarThickness=0 savedScroll.BackgroundTransparency=1 savedScroll.Parent=savedFrame local savedEmptyLabel=__SXLG7.Instance.new("TextLabel")savedEmptyLabel.Size=UDim2.new(1,0,0,scale("Y",36))savedEmptyLabel.Position=UDim2.new(0,0,0.5,-scale("Y",18))savedEmptyLabel.BackgroundTransparency=1 savedEmptyLabel.Text="No saved emotes yet!"savedEmptyLabel.TextColor3=Color3.fromRGB(70,130,255)savedEmptyLabel.Font=Enum.Font.GothamBold savedEmptyLabel.TextScaled=true savedEmptyLabel.Visible=false savedEmptyLabel.Parent=savedScroll local savedLayout=__SXLG7.Instance.new("UIGridLayout")savedLayout.CellSize=UDim2.new(0,scale("X",120),0,scale("Y",180))savedLayout.CellPadding=UDim2.new(0,scale("X",8),0,scale("Y",8))savedLayout.HorizontalAlignment=Enum.HorizontalAlignment.Center savedLayout.Parent=savedScroll local settingsFrame=__SXLG7.Instance.new("Frame")settingsFrame.Size=UDim2.new(0.4,-scale("X",10),1,-scale("Y",70))settingsFrame.Position=UDim2.new(0.6,scale("X",5),0,scale("Y",70))settingsFrame.BackgroundTransparency=1 settingsFrame.Parent=mainContainer local settingsTitle=__SXLG7.Instance.new("TextLabel")settingsTitle.Size=UDim2.new(1,0,0,scale("Y",28))settingsTitle.BackgroundTransparency=1 settingsTitle.Text="Settings"settingsTitle.TextColor3=Color3.fromRGB(70,130,255)settingsTitle.Font=Enum.Font.GothamBold settingsTitle.TextScaled=true settingsTitle.Parent=settingsFrame local scrollFrame=__SXLG7.Instance.new("ScrollingFrame")scrollFrame.Size=UDim2.new(1,-scale("X",20),1,-scale("Y",40))scrollFrame.Position=UDim2.new(0,scale("X",10),0,scale("Y",30))scrollFrame.BackgroundTransparency=1 scrollFrame.CanvasSize=UDim2.new(0,0,0,0)scrollFrame.ScrollBarThickness=6 scrollFrame.Parent=settingsFrame local function lockX()scrollFrame.CanvasPosition=Vector2.new(0,scrollFrame.CanvasPosition.Y)end scrollFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(lockX)local listLayout=__SXLG7.Instance.new("UIListLayout",scrollFrame)listLayout.Padding=UDim.new(0,6)listLayout.FillDirection=Enum.FillDirection.Vertical listLayout.SortOrder=Enum.SortOrder.LayoutOrder listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()scrollFrame.CanvasSize=UDim2.new(0,0,0,listLayout.AbsoluteContentSize.Y+10)end)local function createSlider(name,min,max,default)Settings[name]=default or min local container=__SXLG7.Instance.new("Frame")container.Size=UDim2.new(1,0,0,scale("Y",65))container.BackgroundTransparency=1 container.Parent=scrollFrame local bg=__SXLG7.Instance.new("Frame")bg.Size=UDim2.new(1,0,1,0)bg.BackgroundColor3=Color3.fromRGB(30,30,35)bg.Parent=container __SXLG7.Instance.new("UICorner",bg).CornerRadius=UDim.new(0,8)local label=__SXLG7.Instance.new("TextLabel")label.Size=UDim2.new(0.5,-scale("X",10),0,scale("Y",20))label.Position=UDim2.new(0,10,0,5)label.BackgroundTransparency=1 label.Text=string.format("%s: %.2f",name,Settings[name])label.TextColor3=Color3.new(1,1,1)label.Font=Enum.Font.Gotham label.TextScaled=true label.TextXAlignment=Enum.TextXAlignment.Left label.Parent=bg local textBox=__SXLG7.Instance.new("TextBox")textBox.Size=UDim2.new(0.5,-scale("X",20),0,scale("Y",20))textBox.Position=UDim2.new(0.5,scale("X",10),0,scale("Y",5))textBox.BackgroundColor3=Color3.fromRGB(40,40,50)textBox.Text=tostring(Settings[name])textBox.TextColor3=Color3.new(1,1,1)textBox.Font=Enum.Font.Gotham textBox.TextScaled=true textBox.ClearTextOnFocus=false textBox.Parent=bg __SXLG7.Instance.new("UICorner",textBox).CornerRadius=UDim.new(0,6)local sliderBar=__SXLG7.Instance.new("Frame")sliderBar.Size=UDim2.new(1,-scale("X",40),0,scale("Y",12))sliderBar.Position=UDim2.new(0,scale("X",20),0,scale("Y",35))sliderBar.BackgroundColor3=Color3.fromRGB(40,40,50)sliderBar.Parent=bg __SXLG7.Instance.new("UICorner",sliderBar).CornerRadius=UDim.new(0,6)local sliderFill=__SXLG7.Instance.new("Frame")sliderFill.Size=UDim2.new(0,0,1,0)sliderFill.BackgroundColor3=Color3.fromRGB(70,130,255)sliderFill.Parent=sliderBar __SXLG7.Instance.new("UICorner",sliderFill).CornerRadius=UDim.new(0,6)local thumb=__SXLG7.Instance.new("Frame")thumb.Size=UDim2.new(0,scale("X",20),0,scale("Y",20))thumb.AnchorPoint=Vector2.new(0.5,0.5)thumb.Position=UDim2.new(0,0,0.5,0)thumb.BackgroundColor3=Color3.fromRGB(70,130,255)thumb.Parent=sliderBar __SXLG7.Instance.new("UICorner",thumb).CornerRadius=UDim.new(1,0)local function tweenVisual(rel)local visualRel=math.clamp(rel,0,1)TweenService:Create(sliderFill,TweenInfo.new(0.15),{Size=UDim2.new(visualRel,0,1,0)}):Play()TweenService:Create(thumb,TweenInfo.new(0.15),{Position=UDim2.new(visualRel,0,0.5,0)}):Play()end local function applyValue(value)Settings[name]=value label.Text=string.format("%s: %.2f",name,value)textBox.Text=tostring(value)local visualValue=math.clamp(value,min,max)local rel=(visualValue-min)/(max-min)tweenVisual(rel)if CurrentTrack and CurrentTrack.IsPlaying then if name=="Speed"then CurrentTrack:AdjustSpeed(Settings["Speed"])elseif name=="Weight"then local weight=Settings["Weight"]if weight==0 then weight=0.001 end CurrentTrack:AdjustWeight(weight)elseif name=="Time Position"then if CurrentTrack and CurrentTrack.IsPlaying and CurrentTrack.Length>0 then CurrentTrack.TimePosition=math.clamp(value,0,1)*CurrentTrack.Length end end end end local dragging=false local function updateFromInput(input)local relX=math.clamp((input.Position.X-__SXLG7.Read(sliderBar,"AbsolutePosition").X)/__SXLG7.Read(sliderBar,"AbsoluteSize").X,0,1)local value=math.floor((min+(max-min)*relX)*100)/100 applyValue(value)end sliderBar.InputBegan:Connect(function(input)if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=true updateFromInput(input)end end)thumb.InputBegan:Connect(function(input)if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=true updateFromInput(input)end end)UserInputService.InputChanged:Connect(function(input)if dragging and(input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch)then updateFromInput(input)end end)UserInputService.InputEnded:Connect(function(input)if dragging and(input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch)then dragging=false end end)textBox.FocusLost:Connect(function(enterPressed)if enterPressed then local num=tonumber(textBox.Text)if num then applyValue(num)else textBox.Text=tostring(Settings[name])end end end)applyValue(Settings[name])end local function createToggle(name)local container=__SXLG7.Instance.new("Frame")container.Size=UDim2.new(1,0,0,scale("Y",40))container.BackgroundColor3=Color3.fromRGB(30,30,35)container.Parent=scrollFrame __SXLG7.Instance.new("UICorner",container).CornerRadius=UDim.new(0,6)local label=__SXLG7.Instance.new("TextLabel")label.Size=UDim2.new(0.7,-scale("X",10),1,0)label.Position=UDim2.new(0,scale("X",10),0,0)label.BackgroundTransparency=1 label.Text=name label.TextColor3=Color3.new(1,1,1)label.Font=Enum.Font.Gotham label.TextScaled=true label.TextXAlignment=Enum.TextXAlignment.Left label.Parent=container local toggleBtn=__SXLG7.Instance.new("TextButton")toggleBtn.Size=UDim2.new(0,scale("X",60),0,scale("Y",24))toggleBtn.Position=UDim2.new(1,-scale("X",70),0.5,-scale("Y",12))toggleBtn.BackgroundColor3=Settings[name]and Color3.fromRGB(70,130,255)or Color3.fromRGB(50,50,60)toggleBtn.Text=Settings[name]and"ON"or"OFF"toggleBtn.TextColor3=Color3.new(1,1,1)toggleBtn.Font=Enum.Font.GothamBold toggleBtn.TextScaled=true toggleBtn.Parent=container __SXLG7.Instance.new("UICorner",toggleBtn).CornerRadius=UDim.new(1,0)toggleBtn.MouseButton1Click:Connect(function()Settings[name]=not Settings[name]if Settings[name]then toggleBtn.Text="ON"toggleBtn.BackgroundColor3=Color3.fromRGB(70,130,255)else toggleBtn.Text="OFF"toggleBtn.BackgroundColor3=Color3.fromRGB(50,50,60)end end)end createToggle("Stop On Move")createSlider("Time Position",0,1,Settings["Time Position"])createSlider("Speed",0,5,Settings["Speed"])createSlider("Weight",0,1,Settings["Weight"])createSlider("Fade In",0,2,Settings["Fade In"])createSlider("Fade Out",0,2,Settings["Fade Out"])createToggle("Allow Invisible")local originalCollisionStates={}local lastFixClipState=Settings["Allow Invisible"]local function saveCollisionStates()for _,part in ipairs(character:GetDescendants())do if part:IsA("BasePart")and part~=character.PrimaryPart then originalCollisionStates[part]=part.CanCollide end end end local function disableCollisionsExceptRootPart()if not Settings["Allow Invisible"]then return end for _,part in ipairs(character:GetDescendants())do if part:IsA("BasePart")and part~=character.PrimaryPart then part.CanCollide=false end end end local function restoreCollisionStates()for part,canCollide in pairs(originalCollisionStates)do if part and part.Parent then part.CanCollide=canCollide end end originalCollisionStates={}end saveCollisionStates()local connection connection=RunService.Stepped:Connect(function()if character and character.Parent then local currentFixClip=Settings["Allow Invisible"]if lastFixClipState~=currentFixClip then if currentFixClip then saveCollisionStates()disableCollisionsExceptRootPart()else restoreCollisionStates()end lastFixClipState=currentFixClip elseif currentFixClip then disableCollisionsExceptRootPart()end else restoreCollisionStates()if connection then connection:Disconnect()end end end)player.CharacterAdded:Connect(function(newCharacter)restoreCollisionStates()character=newCharacter humanoid=newCharacter:WaitForChild("Humanoid")saveCollisionStates()lastFixClipState=Settings["Allow Invisible"]if connection then connection:Disconnect()end connection=RunService.Stepped:Connect(function()if character and character.Parent then local currentFixClip=Settings["Allow Invisible"]if lastFixClipState~=currentFixClip then if currentFixClip then saveCollisionStates()disableCollisionsExceptRootPart()else restoreCollisionStates()end lastFixClipState=currentFixClip elseif currentFixClip then disableCollisionsExceptRootPart()end else restoreCollisionStates()if connection then connection:Disconnect()end end end)end)local sortModes={{Enum.CatalogSortType.Relevance,"Relevance"},{Enum.CatalogSortType.PriceHighToLow,"Price High→Low"},{Enum.CatalogSortType.PriceLowToHigh,"Price Low→High"},{Enum.CatalogSortType.MostFavorited,"Most Favorited"},{Enum.CatalogSortType.RecentlyCreated,"Recently Created"},{Enum.CatalogSortType.Bestselling,"Bestselling"},}local currentSortIndex=1 local currentKeyword=""local currentPages=nil local currentPageNumber=1 local function getPages(keyword)local params=CatalogSearchParams.new()params.SearchKeyword=keyword or""params.CategoryFilter=Enum.CatalogCategoryFilter.None params.SalesTypeFilter=Enum.SalesTypeFilter.All params.AssetTypes={Enum.AvatarAssetType.EmoteAnimation}params.IncludeOffSale=true params.SortType=sortModes[currentSortIndex][1]params.Limit=30 local ok,pages=pcall(function()return AvatarEditorService:SearchCatalog(params)end)if not ok then warn("SearchCatalog failed:",pages)return nil end return pages end local function createCard(item)local card=__SXLG7.Instance.new("Frame")card.Size=UDim2.new(0,scale("X",120),0,scale("Y",180))card.BackgroundColor3=Color3.fromRGB(30,30,35)createCorner(card,8)local thumbId=item.AssetId or item.Id local img=__SXLG7.Instance.new("ImageLabel")img.Size=UDim2.new(1,-scale("X",10),0,scale("Y",90))img.Position=UDim2.new(0,scale("X",5),0,scale("Y",5))img.BackgroundTransparency=1 img.ScaleType=Enum.ScaleType.Fit pcall(function()img.Image="rbxthumb://type=Asset&id="..tostring(thumbId).."&w=150&h=150"end)if not img.Image or img.Image==""then img.Image="rbxassetid://5902417546"end img.Parent=card createCorner(img,6)local name=__SXLG7.Instance.new("TextLabel")name.Size=UDim2.new(1,-scale("X",10),0,scale("Y",28))name.Position=UDim2.new(0,scale("X",5),0,scale("Y",100))name.BackgroundTransparency=1 name.Text=item.Name or"Unknown"name.TextScaled=true name.TextWrapped=true name.Font=Enum.Font.GothamBold name.TextColor3=Color3.new(1,1,1)name.Parent=card local playBtn=__SXLG7.Instance.new("TextButton")playBtn.Size=UDim2.new(0.45,-scale("X",5),0,scale("Y",24))playBtn.Position=UDim2.new(0,scale("X",5),1,-scale("Y",29))playBtn.BackgroundColor3=Color3.fromRGB(40,40,50)playBtn.Text="Play"playBtn.Font=Enum.Font.GothamBold playBtn.TextScaled=true playBtn.TextColor3=Color3.fromRGB(70,255,130)playBtn.Parent=card createCorner(playBtn,6)createStroke(playBtn,2,Color3.fromRGB(70,255,130))playBtn.MouseButton1Click:Connect(function()LoadTrack(thumbId)end)local saveBtn=__SXLG7.Instance.new("TextButton")saveBtn.Size=UDim2.new(0.45,-scale("X",5),0,scale("Y",24))saveBtn.Position=UDim2.new(0.55,0,1,-scale("Y",29))saveBtn.BackgroundColor3=Color3.fromRGB(40,40,50)saveBtn.Text="Save"saveBtn.Font=Enum.Font.GothamBold saveBtn.TextScaled=true saveBtn.TextColor3=Color3.fromRGB(70,130,255)saveBtn.Parent=card createCorner(saveBtn,6)createStroke(saveBtn,2,Color3.fromRGB(70,130,255))saveBtn.MouseButton1Click:Connect(function()local alreadySaved=false for _,saved in ipairs(savedEmotes)do if saved.Id==item.Id then alreadySaved=true break end end if not alreadySaved then table.insert(savedEmotes,{Id=item.Id,AssetId=thumbId,Name=item.Name or"Unknown"})saveEmotesToData()saveBtn.Text="Saved!"saveBtn.TextColor3=Color3.fromRGB(70,255,130)wait(1)saveBtn.Text="Save"saveBtn.TextColor3=Color3.fromRGB(70,130,255)else saveBtn.Text="Already Saved"wait(1)saveBtn.Text="Save"end end)return card end local function createSavedCard(item)local card=__SXLG7.Instance.new("Frame")card.Size=UDim2.new(0,scale("X",120),0,scale("Y",180))card.BackgroundColor3=Color3.fromRGB(30,30,35)createCorner(card,8)local thumbId=item.AssetId or item.Id local img=__SXLG7.Instance.new("ImageLabel")img.Size=UDim2.new(1,-scale("X",10),0,scale("Y",90))img.Position=UDim2.new(0,scale("X",5),0,scale("Y",5))img.BackgroundTransparency=1 img.ScaleType=Enum.ScaleType.Fit pcall(function()img.Image="rbxthumb://type=Asset&id="..tostring(thumbId).."&w=150&h=150"end)if not img.Image or img.Image==""then img.Image="rbxassetid://5902417546"end img.Parent=card createCorner(img,6)local name=__SXLG7.Instance.new("TextLabel")name.Size=UDim2.new(1,-scale("X",10),0,scale("Y",28))name.Position=UDim2.new(0,scale("X",5),0,scale("Y",100))name.BackgroundTransparency=1 name.Text=item.Name or"Unknown"name.TextScaled=true name.TextWrapped=true name.Font=Enum.Font.GothamBold name.TextColor3=Color3.new(1,1,1)name.Parent=card local playBtn=__SXLG7.Instance.new("TextButton")playBtn.Size=UDim2.new(0.45,-scale("X",5),0,scale("Y",24))playBtn.Position=UDim2.new(0,scale("X",5),1,-scale("Y",29))playBtn.BackgroundColor3=Color3.fromRGB(40,40,50)playBtn.Text="Play"playBtn.Font=Enum.Font.GothamBold playBtn.TextScaled=true playBtn.TextColor3=Color3.fromRGB(70,255,130)playBtn.Parent=card createCorner(playBtn,6)createStroke(playBtn,2,Color3.fromRGB(70,255,130))playBtn.MouseButton1Click:Connect(function()LoadTrack(thumbId)end)local removeBtn=__SXLG7.Instance.new("TextButton")removeBtn.Size=UDim2.new(0.45,-scale("X",5),0,scale("Y",24))removeBtn.Position=UDim2.new(0.55,0,1,-scale("Y",29))removeBtn.BackgroundColor3=Color3.fromRGB(40,40,50)removeBtn.Text="Remove"removeBtn.Font=Enum.Font.GothamBold removeBtn.TextScaled=true removeBtn.TextColor3=Color3.fromRGB(255,70,70)removeBtn.Parent=card createCorner(removeBtn,6)createStroke(removeBtn,2,Color3.fromRGB(255,70,70))removeBtn.MouseButton1Click:Connect(function()for i,saved in ipairs(savedEmotes)do if saved.Id==item.Id then table.remove(savedEmotes,i)saveEmotesToData()refreshSavedTab()break end end end)return card end function refreshSavedTab()for _,child in ipairs(savedScroll:GetChildren())do if child:IsA("Frame")then __SXLG7.Destroy(child)end end if savedEmotes and#savedEmotes>0 then savedEmptyLabel.Visible=false for _,item in ipairs(savedEmotes)do createSavedCard(item).Parent=savedScroll end else savedEmptyLabel.Visible=true end savedScroll.CanvasSize=UDim2.new(0,0,0,savedLayout.AbsoluteContentSize.Y+8)end local function updateNavVisibility()prevBtn.Visible=(currentPageNumber>1)if currentPages and typeof(currentPages.IsFinished)=="boolean"then nextBtn.Visible=not currentPages.IsFinished else nextBtn.Visible=true end end local function showPage(pages)for _,child in ipairs(scroll:GetChildren())do if child:IsA("Frame")then __SXLG7.Destroy(child)end end local currentList=nil local ok,got=pcall(function()return pages:GetCurrentPage()end)if ok then currentList=got else warn("Failed to GetCurrentPage:",got)end if currentList and#currentList>0 then emptyLabel.Visible=false for _,item in ipairs(currentList)do createCard(item).Parent=scroll end else emptyLabel.Visible=true end scroll.CanvasSize=UDim2.new(0,0,0,layout.AbsoluteContentSize.Y+8)pageLabel.Text="Page "..tostring(currentPageNumber)updateNavVisibility()end local function fetchPagesTo(targetPage)local pages=getPages(currentKeyword)if not pages then return nil end for i=2,targetPage do if pages.IsFinished then break end local ok,err=pcall(function()pages:AdvanceToNextPageAsync()end)if not ok then break end end return pages end local function doNewSearch(keyword)currentKeyword=keyword or""currentPageNumber=1 searchBox.Text=currentKeyword currentPages=getPages(currentKeyword)if currentPages then showPage(currentPages)end end searchBtn.MouseButton1Click:Connect(function()doNewSearch(searchBox.Text)end)sortBtn.MouseButton1Click:Connect(function()currentSortIndex=currentSortIndex%#sortModes+1 sortBtn.Text="Sort: "..sortModes[currentSortIndex][2]doNewSearch(currentKeyword)end)searchBox.FocusLost:Connect(function(enterPressed)if enterPressed then doNewSearch(searchBox.Text)end end)nextBtn.MouseButton1Click:Connect(function()if not currentPages then return end if currentPages.IsFinished then return end local ok,err=pcall(function()currentPages:AdvanceToNextPageAsync()end)if ok then currentPageNumber=currentPageNumber+1 showPage(currentPages)else warn("AdvanceToNextPageAsync failed")local targetPage=currentPageNumber+1 local fresh=fetchPagesTo(targetPage)if fresh then currentPages=fresh currentPageNumber=math.min(targetPage,currentPageNumber+1)showPage(currentPages)end end end)prevBtn.MouseButton1Click:Connect(function()if not currentPages then return end if currentPageNumber<=1 then return end local ok,err=pcall(function()currentPages:AdvanceToPreviousPageAsync()end)if ok then currentPageNumber=math.max(1,currentPageNumber-1)showPage(currentPages)else warn("AdvanceToPreviousPageAsync failed")local targetPage=math.max(1,currentPageNumber-1)local fresh=fetchPagesTo(targetPage)if fresh then currentPages=fresh currentPageNumber=targetPage showPage(currentPages)end end end)catalogTabBtn.MouseButton1Click:Connect(function()catalogFrame.Visible=true savedFrame.Visible=false catalogTabBtn.BackgroundColor3=Color3.fromRGB(35,35,45)catalogTabBtn.TextColor3=Color3.fromRGB(70,130,255)catalogTabBtn:FindFirstChildOfClass("UIStroke").Color=Color3.fromRGB(70,130,255)savedTabBtn.BackgroundColor3=Color3.fromRGB(30,30,35)savedTabBtn.TextColor3=Color3.new(0.8,0.8,0.8)savedTabBtn:FindFirstChildOfClass("UIStroke").Color=Color3.fromRGB(50,50,60)end)savedTabBtn.MouseButton1Click:Connect(function()catalogFrame.Visible=false savedFrame.Visible=true catalogTabBtn.BackgroundColor3=Color3.fromRGB(30,30,35)catalogTabBtn.TextColor3=Color3.new(0.8,0.8,0.8)catalogTabBtn:FindFirstChildOfClass("UIStroke").Color=Color3.fromRGB(50,50,60)savedTabBtn.BackgroundColor3=Color3.fromRGB(35,35,45)savedTabBtn.TextColor3=Color3.fromRGB(70,130,255)savedTabBtn:FindFirstChildOfClass("UIStroke").Color=Color3.fromRGB(70,130,255)refreshSavedTab()end)doNewSearch("")
+local Screen = setmetatable({}, {
+__index = function(_, key)
+    local cam = workspace.CurrentCamera
+    local size = cam and cam.ViewportSize or Vector2.new(1920, 1080)
+    if key == "Width" then
+        return size.X
+    elseif key == "Height" then
+        return size.Y
+    elseif key == "Size" then
+        return size
+    end
+end})
+
+function scale(axis, value)
+    if axis == "X" then
+        return value * (Screen.Width / 1920) * 1.5
+    elseif axis == "Y" then
+        return value * (Screen.Height / 1080) * 1.5
+    end
+end
+
+-- Services setup
+function missing(t, f, fallback)
+    if type(f) == t then return f end
+    return fallback
+end
+
+cloneref = missing("function", cloneref, function(...) return ... end)
+
+local Services = setmetatable({}, {
+    __index = function(_, name)
+        return cloneref(game:GetService(name))
+    end
+})
+
+local Players = Services.Players
+local RunService = Services.RunService
+local UserInputService = Services.UserInputService
+local TweenService = Services.TweenService
+local AvatarEditorService = Services.AvatarEditorService
+local HttpService = Services.HttpService
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local lastPosition = character.PrimaryPart and character.PrimaryPart.Position or Vector3.new()
+
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoid = newCharacter:WaitForChild("Humanoid")
+    lastPosition = character.PrimaryPart and character.PrimaryPart.Position or Vector3.new()
+end)
+
+-- Settings
+local Settings = _G
+Settings["Stop On Move"] = false
+Settings["Fade In"] = 0.1
+Settings["Fade Out"] = 0.1
+Settings["Weight"] = 1
+Settings["Speed"] = 1
+Settings["Allow Invisible"] = true
+Settings["Time Position"] = 0
+
+-- Saved emotes data
+local savedEmotes = {}
+local SAVE_FILE = "SiextherEmote.json"
+
+local function loadSavedEmotes()
+    local success, data = pcall(function()
+        if readfile and isfile and isfile(SAVE_FILE) then
+            return HttpService:JSONDecode(readfile(SAVE_FILE))
+        end
+        return {}
+    end)
+    if success then
+        savedEmotes = data
+    else
+        savedEmotes = {}
+    end
+end
+
+local function saveEmotesToData()
+    pcall(function()
+        if writefile then
+            writefile(SAVE_FILE, HttpService:JSONEncode(savedEmotes))
+        end
+    end)
+end
+
+loadSavedEmotes()
+
+-- Animation track management
+local CurrentTrack = nil
+
+local function LoadTrack(id)
+    if CurrentTrack then
+        CurrentTrack:Stop(Settings["Fade Out"])
+    end
+
+    local animId
+    local ok, result = pcall(function()
+        return game:GetObjects("rbxassetid://" .. tostring(id))
+    end)
+
+    if ok and result and #result > 0 then
+        local anim = result[1]
+        if anim:IsA("Animation") then
+            animId = anim.AnimationId
+        else
+            animId = "rbxassetid://" .. tostring(id)
+        end
+    else
+        animId = "rbxassetid://" .. tostring(id)
+    end
+
+    local newAnim = Instance.new("Animation")
+    newAnim.AnimationId = animId
+    local newTrack = humanoid:LoadAnimation(newAnim)
+    newTrack.Priority = Enum.AnimationPriority.Action4
+
+    local weight = Settings["Weight"]
+    if weight == 0 then weight = 0.001 end
+
+    newTrack:Play(Settings["Fade In"], weight, Settings["Speed"])
+    CurrentTrack = newTrack
+    CurrentTrack.TimePosition = math.clamp(Settings["Time Position"], 0, 1) * CurrentTrack.Length
+
+    return newTrack
+end
+
+-- Stop on move functionality
+RunService.RenderStepped:Connect(function()
+    if character.PrimaryPart then
+        if Settings["Stop On Move"] and CurrentTrack and CurrentTrack.IsPlaying then
+            local moved = (character.PrimaryPart.Position - lastPosition).Magnitude > 0.1
+            local jumped = humanoid and humanoid:GetState() == Enum.HumanoidStateType.Jumping
+
+            if moved or jumped then
+                CurrentTrack:Stop(Settings["Fade Out"])
+                CurrentTrack = nil
+            end
+        end
+        lastPosition = character.PrimaryPart.Position
+    end
+end)
+
+-- === GUI ===
+local CoreGui = Services.CoreGui
+local gui = Instance.new("ScreenGui")
+gui.Name = "HannSiexther Emote"
+gui.Parent = CoreGui
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local function createGradient(parent, colorSequence)
+    return
+end
+
+local function createCorner(parent, cornerRadius)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, cornerRadius)
+    corner.Parent = parent
+    return corner
+end
+
+-- Helper function to add stroke
+local function createStroke(parent, thickness, color)
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = thickness or 2
+    stroke.Color = color or Color3.fromRGB(70, 130, 255)
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Parent = parent
+    return stroke
+end
+
+-- Minimize Ball (Bola Putih Kecil dengan Emoji)
+local minimizeBall = Instance.new("TextButton")
+minimizeBall.Name = "MinimizeBall"
+minimizeBall.Size = UDim2.new(0, 70, 0, 70)
+minimizeBall.Position = UDim2.new(0.9, -scale("X", 30), 0.1, 0)
+minimizeBall.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+minimizeBall.Text = "💃"
+minimizeBall.TextSize = 20
+minimizeBall.Font = Enum.Font.GothamBold
+minimizeBall.TextColor3 = Color3.fromRGB(70, 130, 255)
+minimizeBall.Visible = false
+minimizeBall.Active = true
+minimizeBall.Draggable = true
+minimizeBall.Parent = gui
+minimizeBall.ZIndex = 999
+
+createCorner(minimizeBall, 12)
+
+-- Main container frame
+local mainContainer = Instance.new("Frame")
+mainContainer.Size = UDim2.new(0, scale("X", 600), 0, scale("Y", 400))
+mainContainer.Position = UDim2.new(0.5, -scale("X", 300), 0.5, -scale("Y", 200))
+mainContainer.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+mainContainer.Active = true
+mainContainer.Draggable = true
+mainContainer.Parent = gui
+
+createCorner(mainContainer, 12)
+createStroke(mainContainer, 2, Color3.fromRGB(70, 130, 255))
+
+-- Store original size untuk minimize
+local originalSize = mainContainer.Size
+
+-- Title
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, scale("Y", 36))
+title.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+title.Text = "SIEXTHER EMOTE"
+title.TextColor3 = Color3.fromRGB(70, 130, 255)
+title.Font = Enum.Font.GothamBold
+title.TextScaled = true
+title.Parent = mainContainer
+
+createCorner(title, 8)
+
+-- Close Button (X)
+local closeBtn = Instance.new("TextButton")
+closeBtn.Name = "CloseButton"
+closeBtn.Size = UDim2.new(0, scale("X", 30), 0, scale("Y", 30))
+closeBtn.Position = UDim2.new(1, -scale("X", 36), 0, scale("Y", 3))
+closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+closeBtn.TextColor3 = Color3.new(1, 1, 1)
+closeBtn.TextScaled = true
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Text = "X"
+closeBtn.Parent = title
+createCorner(closeBtn, 4)
+
+
+-- Minimize Button (−)
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Name = "MinimizeButton"
+minimizeBtn.Size = UDim2.new(0, scale("X", 30), 0, scale("Y", 30))
+minimizeBtn.Position = UDim2.new(1, -scale("X", 72), 0, scale("Y", 3))
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+minimizeBtn.TextColor3 = Color3.fromRGB(70, 130, 255)
+minimizeBtn.TextScaled = true
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.Text = "−"
+minimizeBtn.Parent = title
+createCorner(minimizeBtn, 4)
+
+
+
+-- State untuk minimize
+local isMinimized = false
+
+-- Close button functionality
+closeBtn.MouseButton1Click:Connect(function()
+    gui:Destroy()
+end)
+
+-- Minimize button functionality
+minimizeBtn.MouseButton1Click:Connect(function()
+    isMinimized = true
+    
+    mainContainer.Visible = false
+    
+    minimizeBall.Visible = true
+    minimizeBall.Size = UDim2.new(0, 0, 0, 0)
+    
+    local openTween = TweenService:Create(
+        minimizeBall,
+        TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        {Size = UDim2.new(0, scale("X", 60), 0, scale("Y", 60))}
+    )
+    openTween:Play()
+end)
+
+-- Minimize ball click functionality
+minimizeBall.MouseButton1Click:Connect(function()
+    isMinimized = false
+    
+    local closeTween = TweenService:Create(
+        minimizeBall,
+        TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.In),
+        {Size = UDim2.new(0, 0, 0, 0)}
+    )
+    
+    closeTween.Completed:Connect(function()
+        minimizeBall.Visible = false
+        
+        mainContainer.Visible = true
+        mainContainer.Size = UDim2.new(0, 0, 0, 0)
+        
+        local expandTween = TweenService:Create(
+            mainContainer,
+            TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+            {Size = originalSize}
+        )
+        expandTween:Play()
+    end)
+    
+    closeTween:Play()
+end)
+
+-- Tab buttons
+local catalogTabBtn = Instance.new("TextButton")
+catalogTabBtn.Size = UDim2.new(0.3, 0, 0, scale("Y", 24))
+catalogTabBtn.Position = UDim2.new(0.05, 0, 0, scale("Y", 40))
+catalogTabBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+catalogTabBtn.Text = "Catalog"
+catalogTabBtn.TextColor3 = Color3.fromRGB(70, 130, 255)
+catalogTabBtn.Font = Enum.Font.GothamBold
+catalogTabBtn.TextScaled = true
+catalogTabBtn.Parent = mainContainer
+createCorner(catalogTabBtn, 6)
+createStroke(catalogTabBtn, 2, Color3.fromRGB(70, 130, 255))
+
+local savedTabBtn = Instance.new("TextButton")
+savedTabBtn.Size = UDim2.new(0.3, 0, 0, scale("Y", 24))
+savedTabBtn.Position = UDim2.new(0.35, 0, 0, scale("Y", 40))
+savedTabBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+savedTabBtn.Text = "Saved"
+savedTabBtn.TextColor3 = Color3.new(0.8, 0.8, 0.8)
+savedTabBtn.Font = Enum.Font.GothamBold
+savedTabBtn.TextScaled = true
+savedTabBtn.Parent = mainContainer
+createCorner(savedTabBtn, 6)
+createStroke(savedTabBtn, 2, Color3.fromRGB(50, 50, 60))
+
+-- Divider
+local divider = Instance.new("Frame")
+divider.Size = UDim2.new(0, scale("X", 2), 1, -scale("Y", 70))
+divider.Position = UDim2.new(0.6, -scale("X", 1), 0, scale("Y", 70))
+divider.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
+divider.Parent = mainContainer
+createCorner(divider, 1)
+
+-- Catalog section
+local catalogFrame = Instance.new("Frame")
+catalogFrame.Size = UDim2.new(0.6, -scale("X", 10), 1, -scale("Y", 70))
+catalogFrame.Position = UDim2.new(0, scale("X", 5), 0, scale("Y", 70))
+catalogFrame.BackgroundTransparency = 1
+catalogFrame.Visible = true
+catalogFrame.Parent = mainContainer
+
+-- Search box
+local searchBox = Instance.new("TextBox")
+searchBox.Size = UDim2.new(0.6, -scale("X", 8), 0, scale("Y", 28))
+searchBox.Position = UDim2.new(0, scale("X", 8), 0, 0)
+searchBox.PlaceholderText = "Search..."
+searchBox.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+searchBox.TextColor3 = Color3.new(1, 1, 1)
+searchBox.Font = Enum.Font.Gotham
+searchBox.TextScaled = true
+searchBox.ClearTextOnFocus = false
+searchBox.Parent = catalogFrame
+
+createCorner(searchBox, 6)
+
+-- Search button
+local searchBtn = Instance.new("TextButton")
+searchBtn.Size = UDim2.new(0.2, -scale("X", 4), 0, scale("Y", 28))
+searchBtn.Position = UDim2.new(0.6, scale("X", 4), 0, 0)
+searchBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+searchBtn.Text = "Search"
+searchBtn.Font = Enum.Font.GothamBold
+searchBtn.TextScaled = true
+searchBtn.TextColor3 = Color3.fromRGB(70, 130, 255)
+searchBtn.Parent = catalogFrame
+
+createCorner(searchBtn, 6)
+
+
+-- Sort button
+local sortBtn = Instance.new("TextButton")
+sortBtn.Size = UDim2.new(0.2, -scale("X", 8), 0, scale("Y", 28))
+sortBtn.Position = UDim2.new(0.8, scale("X", 4), 0, 0)
+sortBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+sortBtn.Text = "Sort: Relevance"
+sortBtn.Font = Enum.Font.GothamBold
+sortBtn.TextScaled = true
+sortBtn.TextColor3 = Color3.fromRGB(70, 130, 255)
+sortBtn.Parent = catalogFrame
+
+createCorner(sortBtn, 6)
+
+
+-- Scroll frame for catalog items
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, -scale("X", 16), 1, -scale("Y", 100))
+scroll.Position = UDim2.new(0, scale("X", 8), 0, scale("Y", 36))
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.ScrollBarThickness = 6
+scroll.BackgroundTransparency = 1
+scroll.Parent = catalogFrame
+
+-- Empty results label
+local emptyLabel = Instance.new("TextLabel")
+emptyLabel.Size = UDim2.new(1, 0, 0, scale("Y", 36))
+emptyLabel.Position = UDim2.new(0, 0, 0.5, -scale("Y", 18))
+emptyLabel.BackgroundTransparency = 1
+emptyLabel.Text = "Nothing Silly Here :3 (except me)"
+emptyLabel.TextColor3 = Color3.fromRGB(70, 130, 255)
+emptyLabel.Font = Enum.Font.GothamBold
+emptyLabel.TextScaled = true
+emptyLabel.Visible = false
+emptyLabel.Parent = scroll
+
+local layout = Instance.new("UIGridLayout")
+layout.CellSize = UDim2.new(0, scale("X", 120), 0, scale("Y", 180))
+layout.CellPadding = UDim2.new(0, scale("X", 8), 0, scale("Y", 8))
+layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+layout.Parent = scroll
+
+-- Navigation buttons
+local prevBtn = Instance.new("TextButton")
+prevBtn.Size = UDim2.new(0.4, -scale("X", 6), 0, scale("Y", 32))
+prevBtn.Position = UDim2.new(0, scale("X", 4), 1, -scale("Y", 36))
+prevBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+prevBtn.Text = "< Prev"
+prevBtn.Font = Enum.Font.GothamBold
+prevBtn.TextScaled = true
+prevBtn.TextColor3 = Color3.fromRGB(70, 130, 255)
+prevBtn.Parent = catalogFrame
+
+createCorner(prevBtn, 6)
+
+
+local nextBtn = Instance.new("TextButton")
+nextBtn.Size = UDim2.new(0.4, -scale("X", 6), 0, scale("Y", 32))
+nextBtn.Position = UDim2.new(0.6, scale("X", 2), 1, -scale("Y", 36))
+nextBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+nextBtn.Text = "Next >"
+nextBtn.Font = Enum.Font.GothamBold
+nextBtn.TextScaled = true
+nextBtn.TextColor3 = Color3.fromRGB(70, 130, 255)
+nextBtn.Parent = catalogFrame
+
+createCorner(nextBtn, 6)
+
+-- Page label
+local pageLabel = Instance.new("TextLabel")
+pageLabel.Size = UDim2.new(0.2, 0, 0, scale("Y", 32))
+pageLabel.Position = UDim2.new(0.4, scale("X", 2), 1, -scale("Y", 36))
+pageLabel.BackgroundTransparency = 1
+pageLabel.Font = Enum.Font.Gotham
+pageLabel.TextScaled = true
+pageLabel.TextColor3 = Color3.fromRGB(70, 130, 255)
+pageLabel.Text = "Page 1"
+pageLabel.Parent = catalogFrame
+
+-- Saved section
+local savedFrame = Instance.new("Frame")
+savedFrame.Size = UDim2.new(0.6, -scale("X", 10), 1, -scale("Y", 70))
+savedFrame.Position = UDim2.new(0, scale("X", 5), 0, scale("Y", 70))
+savedFrame.BackgroundTransparency = 1
+savedFrame.Visible = false
+savedFrame.Parent = mainContainer
+
+-- Saved scroll frame
+local savedScroll = Instance.new("ScrollingFrame")
+savedScroll.Size = UDim2.new(1, -scale("X", 16), 1, -scale("Y", 40))
+savedScroll.Position = UDim2.new(0, scale("X", 8), 0, 0)
+savedScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+savedScroll.ScrollBarThickness = 0
+savedScroll.BackgroundTransparency = 1
+savedScroll.Parent = savedFrame
+
+-- Saved empty label
+local savedEmptyLabel = Instance.new("TextLabel")
+savedEmptyLabel.Size = UDim2.new(1, 0, 0, scale("Y", 36))
+savedEmptyLabel.Position = UDim2.new(0, 0, 0.5, -scale("Y", 18))
+savedEmptyLabel.BackgroundTransparency = 1
+savedEmptyLabel.Text = "No saved emotes yet!"
+savedEmptyLabel.TextColor3 = Color3.fromRGB(70, 130, 255)
+savedEmptyLabel.Font = Enum.Font.GothamBold
+savedEmptyLabel.TextScaled = true
+savedEmptyLabel.Visible = false
+savedEmptyLabel.Parent = savedScroll
+
+local savedLayout = Instance.new("UIGridLayout")
+savedLayout.CellSize = UDim2.new(0, scale("X", 120), 0, scale("Y", 180))
+savedLayout.CellPadding = UDim2.new(0, scale("X", 8), 0, scale("Y", 8))
+savedLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+savedLayout.Parent = savedScroll
+
+-- Settings section
+local settingsFrame = Instance.new("Frame")
+settingsFrame.Size = UDim2.new(0.4, -scale("X", 10), 1, -scale("Y", 70))
+settingsFrame.Position = UDim2.new(0.6, scale("X", 5), 0, scale("Y", 70))
+settingsFrame.BackgroundTransparency = 1
+settingsFrame.Parent = mainContainer
+
+-- Settings title
+local settingsTitle = Instance.new("TextLabel")
+settingsTitle.Size = UDim2.new(1, 0, 0, scale("Y", 28))
+settingsTitle.BackgroundTransparency = 1
+settingsTitle.Text = "Settings"
+settingsTitle.TextColor3 = Color3.fromRGB(70, 130, 255)
+settingsTitle.Font = Enum.Font.GothamBold
+settingsTitle.TextScaled = true
+settingsTitle.Parent = settingsFrame
+
+-- Settings scroll frame
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Size = UDim2.new(1, -scale("X", 20), 1, -scale("Y", 40))
+scrollFrame.Position = UDim2.new(0, scale("X", 10), 0, scale("Y", 30))
+scrollFrame.BackgroundTransparency = 1
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+scrollFrame.ScrollBarThickness = 6
+scrollFrame.Parent = settingsFrame
+
+local function lockX()
+    scrollFrame.CanvasPosition = Vector2.new(0, scrollFrame.CanvasPosition.Y)
+end
+scrollFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(lockX)
+
+local listLayout = Instance.new("UIListLayout", scrollFrame)
+listLayout.Padding = UDim.new(0, 6)
+listLayout.FillDirection = Enum.FillDirection.Vertical
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 10)
+end)
+
+-- Slider creator function
+local function createSlider(name, min, max, default)
+    Settings[name] = default or min
+
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(1, 0, 0, scale("Y", 65))
+    container.BackgroundTransparency = 1
+    container.Parent = scrollFrame
+
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.new(1, 0, 1, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    bg.Parent = container
+    Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 8)
+    
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.5, -scale("X", 10), 0, scale("Y", 20))
+    label.Position = UDim2.new(0, 10, 0, 5)
+    label.BackgroundTransparency = 1
+    label.Text = string.format("%s: %.2f", name, Settings[name])
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.Font = Enum.Font.Gotham
+    label.TextScaled = true
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = bg
+
+    local textBox = Instance.new("TextBox")
+    textBox.Size = UDim2.new(0.5, -scale("X", 20), 0, scale("Y", 20))
+    textBox.Position = UDim2.new(0.5, scale("X", 10), 0, scale("Y", 5))
+    textBox.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    textBox.Text = tostring(Settings[name])
+    textBox.TextColor3 = Color3.new(1, 1, 1)
+    textBox.Font = Enum.Font.Gotham
+    textBox.TextScaled = true
+    textBox.ClearTextOnFocus = false
+    textBox.Parent = bg
+    Instance.new("UICorner", textBox).CornerRadius = UDim.new(0, 6)
+
+    local sliderBar = Instance.new("Frame")
+    sliderBar.Size = UDim2.new(1, -scale("X", 40), 0, scale("Y", 12))
+    sliderBar.Position = UDim2.new(0, scale("X", 20), 0, scale("Y", 35))
+    sliderBar.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    sliderBar.Parent = bg
+    Instance.new("UICorner", sliderBar).CornerRadius = UDim.new(0, 6)
+
+    local sliderFill = Instance.new("Frame")
+    sliderFill.Size = UDim2.new(0, 0, 1, 0)
+    sliderFill.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
+    sliderFill.Parent = sliderBar
+    Instance.new("UICorner", sliderFill).CornerRadius = UDim.new(0, 6)
+
+    local thumb = Instance.new("Frame")
+    thumb.Size = UDim2.new(0, scale("X", 20), 0, scale("Y", 20))
+    thumb.AnchorPoint = Vector2.new(0.5, 0.5)
+    thumb.Position = UDim2.new(0, 0, 0.5, 0)
+    thumb.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
+    thumb.Parent = sliderBar
+    Instance.new("UICorner", thumb).CornerRadius = UDim.new(1, 0)
+
+    local function tweenVisual(rel)
+        local visualRel = math.clamp(rel, 0, 1)
+        TweenService:Create(sliderFill, TweenInfo.new(0.15), {Size = UDim2.new(visualRel, 0, 1, 0)}):Play()
+        TweenService:Create(thumb, TweenInfo.new(0.15), {Position = UDim2.new(visualRel, 0, 0.5, 0)}):Play()
+    end
+
+    local function applyValue(value)
+        Settings[name] = value
+        label.Text = string.format("%s: %.2f", name, value)
+        textBox.Text = tostring(value)
+
+        local visualValue = math.clamp(value, min, max)
+        local rel = (visualValue - min) / (max - min)
+        tweenVisual(rel)
+
+        if CurrentTrack and CurrentTrack.IsPlaying then
+            if name == "Speed" then
+                CurrentTrack:AdjustSpeed(Settings["Speed"])
+            elseif name == "Weight" then
+                local weight = Settings["Weight"]
+                if weight == 0 then weight = 0.001 end
+                CurrentTrack:AdjustWeight(weight)
+            elseif name == "Time Position" then
+                if CurrentTrack and CurrentTrack.IsPlaying and CurrentTrack.Length > 0 then
+                    CurrentTrack.TimePosition = math.clamp(value, 0, 1) * CurrentTrack.Length
+                end
+            end
+        end
+    end
+
+    local dragging = false
+    local function updateFromInput(input)
+        local relX = math.clamp((input.Position.X - sliderBar.AbsolutePosition.X) / sliderBar.AbsoluteSize.X, 0, 1)
+        local value = math.floor((min + (max - min) * relX) * 100) / 100
+        applyValue(value)
+    end
+
+    sliderBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            updateFromInput(input)
+        end
+    end)
+    thumb.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            updateFromInput(input)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            updateFromInput(input)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+            dragging = false
+        end
+    end)
+
+    textBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            local num = tonumber(textBox.Text)
+            if num then
+                applyValue(num)
+            else
+                textBox.Text = tostring(Settings[name])
+            end
+        end
+    end)
+
+    applyValue(Settings[name])
+end
+
+-- Toggle creator function
+local function createToggle(name)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(1, 0, 0, scale("Y", 40))
+    container.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    container.Parent = scrollFrame
+    Instance.new("UICorner", container).CornerRadius = UDim.new(0, 6)
+    
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.7, -scale("X", 10), 1, 0)
+    label.Position = UDim2.new(0, scale("X", 10), 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = name
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.Font = Enum.Font.Gotham
+    label.TextScaled = true
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = container
+
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Size = UDim2.new(0, scale("X", 60), 0, scale("Y", 24))
+    toggleBtn.Position = UDim2.new(1, -scale("X", 70), 0.5, -scale("Y", 12))
+    toggleBtn.BackgroundColor3 = Settings[name] and Color3.fromRGB(70, 130, 255) or Color3.fromRGB(50, 50, 60)
+    toggleBtn.Text = Settings[name] and "ON" or "OFF"
+    toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.TextScaled = true
+    toggleBtn.Parent = container
+    Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(1, 0)
+
+    toggleBtn.MouseButton1Click:Connect(function()
+        Settings[name] = not Settings[name]
+        if Settings[name] then
+            toggleBtn.Text = "ON"
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
+        else
+            toggleBtn.Text = "OFF"
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+        end
+    end)
+end
+
+-- Create settings controls
+createToggle("Stop On Move")
+createSlider("Time Position", 0, 1, Settings["Time Position"])
+createSlider("Speed", 0, 5, Settings["Speed"])
+createSlider("Weight", 0, 1, Settings["Weight"])
+createSlider("Fade In", 0, 2, Settings["Fade In"])
+createSlider("Fade Out", 0, 2, Settings["Fade Out"])
+createToggle("Allow Invisible")
+
+-- Allow Invisible functionality
+local originalCollisionStates = {}
+local lastFixClipState = Settings["Allow Invisible"]
+
+local function saveCollisionStates()
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") and part ~= character.PrimaryPart then
+            originalCollisionStates[part] = part.CanCollide
+        end
+    end
+end
+
+local function disableCollisionsExceptRootPart()
+    if not Settings["Allow Invisible"] then
+        return
+    end
+
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") and part ~= character.PrimaryPart then
+            part.CanCollide = false
+        end
+    end
+end
+
+local function restoreCollisionStates()
+    for part, canCollide in pairs(originalCollisionStates) do
+        if part and part.Parent then
+            part.CanCollide = canCollide
+        end
+    end
+    originalCollisionStates = {}
+end
+
+saveCollisionStates()
+
+local connection
+connection = RunService.Stepped:Connect(function()
+    if character and character.Parent then
+        local currentFixClip = Settings["Allow Invisible"]
+
+        if lastFixClipState ~= currentFixClip then
+            if currentFixClip then
+                saveCollisionStates()
+                disableCollisionsExceptRootPart()
+            else
+                restoreCollisionStates()
+            end
+            lastFixClipState = currentFixClip
+        elseif currentFixClip then
+            disableCollisionsExceptRootPart()
+        end
+    else
+        restoreCollisionStates()
+        if connection then
+            connection:Disconnect()
+        end
+    end
+end)
+
+player.CharacterAdded:Connect(function(newCharacter)
+    restoreCollisionStates()
+    character = newCharacter
+    humanoid = newCharacter:WaitForChild("Humanoid")
+
+    saveCollisionStates()
+    lastFixClipState = Settings["Allow Invisible"]
+
+    if connection then
+        connection:Disconnect()
+    end
+
+    connection = RunService.Stepped:Connect(function()
+        if character and character.Parent then
+            local currentFixClip = Settings["Allow Invisible"]
+
+            if lastFixClipState ~= currentFixClip then
+                if currentFixClip then
+                    saveCollisionStates()
+                    disableCollisionsExceptRootPart()
+                else
+                    restoreCollisionStates()
+                end
+                lastFixClipState = currentFixClip
+            elseif currentFixClip then
+                disableCollisionsExceptRootPart()
+            end
+        else
+            restoreCollisionStates()
+            if connection then
+                connection:Disconnect()
+            end
+        end
+    end)
+end)
+
+-- === State ===
+local sortModes = {
+    {Enum.CatalogSortType.Relevance, "Relevance"},
+    {Enum.CatalogSortType.PriceHighToLow, "Price High→Low"},
+    {Enum.CatalogSortType.PriceLowToHigh, "Price Low→High"},
+    {Enum.CatalogSortType.MostFavorited, "Most Favorited"},
+    {Enum.CatalogSortType.RecentlyCreated, "Recently Created"},
+    {Enum.CatalogSortType.Bestselling, "Bestselling"},
+}
+local currentSortIndex = 1
+local currentKeyword = ""
+local currentPages = nil
+local currentPageNumber = 1
+
+-- === Catalog fetch ===
+local function getPages(keyword)
+    local params = CatalogSearchParams.new()
+    params.SearchKeyword = keyword or ""
+    params.CategoryFilter = Enum.CatalogCategoryFilter.None
+    params.SalesTypeFilter = Enum.SalesTypeFilter.All
+    params.AssetTypes = { Enum.AvatarAssetType.EmoteAnimation }
+    params.IncludeOffSale = true
+    params.SortType = sortModes[currentSortIndex][1]
+    params.Limit = 30
+
+    local ok, pages = pcall(function()
+        return AvatarEditorService:SearchCatalog(params)
+    end)
+
+    if not ok then
+        warn("SearchCatalog failed:", pages)
+        return nil
+    end
+    return pages
+end
+
+-- === Card builder ===
+local function createCard(item)
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(0, scale("X", 120), 0, scale("Y", 180))
+    card.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+
+    createCorner(card, 8)
+    
+    local thumbId = item.AssetId or item.Id
+    local img = Instance.new("ImageLabel")
+    img.Size = UDim2.new(1, -scale("X", 10), 0, scale("Y", 90))
+    img.Position = UDim2.new(0, scale("X", 5), 0, scale("Y", 5))
+    img.BackgroundTransparency = 1
+    img.ScaleType = Enum.ScaleType.Fit
+
+    pcall(function()
+        img.Image = "rbxthumb://type=Asset&id=" .. tostring(thumbId) .. "&w=150&h=150"
+    end)
+
+    if not img.Image or img.Image == "" then
+        img.Image = "rbxassetid://5902417546"
+    end
+
+    img.Parent = card
+    createCorner(img, 6)
+
+    local name = Instance.new("TextLabel")
+    name.Size = UDim2.new(1, -scale("X", 10), 0, scale("Y", 28))
+    name.Position = UDim2.new(0, scale("X", 5), 0, scale("Y", 100))
+    name.BackgroundTransparency = 1
+    name.Text = item.Name or "Unknown"
+    name.TextScaled = true
+    name.TextWrapped = true
+    name.Font = Enum.Font.GothamBold
+    name.TextColor3 = Color3.new(1, 1, 1)
+    name.Parent = card
+
+    local playBtn = Instance.new("TextButton")
+    playBtn.Size = UDim2.new(0.45, -scale("X", 5), 0, scale("Y", 24))
+    playBtn.Position = UDim2.new(0, scale("X", 5), 1, -scale("Y", 29))
+    playBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    playBtn.Text = "Play"
+    playBtn.Font = Enum.Font.GothamBold
+    playBtn.TextScaled = true
+    playBtn.TextColor3 = Color3.fromRGB(70, 255, 130)
+    playBtn.Parent = card
+
+    createCorner(playBtn, 6)
+    createStroke(playBtn, 2, Color3.fromRGB(70, 255, 130))
+
+    playBtn.MouseButton1Click:Connect(function()
+        LoadTrack(thumbId)
+    end)
+
+    local saveBtn = Instance.new("TextButton")
+    saveBtn.Size = UDim2.new(0.45, -scale("X", 5), 0, scale("Y", 24))
+    saveBtn.Position = UDim2.new(0.55, 0, 1, -scale("Y", 29))
+    saveBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    saveBtn.Text = "Save"
+    saveBtn.Font = Enum.Font.GothamBold
+    saveBtn.TextScaled = true
+    saveBtn.TextColor3 = Color3.fromRGB(70, 130, 255)
+    saveBtn.Parent = card
+
+    createCorner(saveBtn, 6)
+    createStroke(saveBtn, 2, Color3.fromRGB(70, 130, 255))
+
+    saveBtn.MouseButton1Click:Connect(function()
+        local alreadySaved = false
+        for _, saved in ipairs(savedEmotes) do
+            if saved.Id == item.Id then
+                alreadySaved = true
+                break
+            end
+        end
+
+        if not alreadySaved then
+            table.insert(savedEmotes, {
+                Id = item.Id,
+                AssetId = thumbId,
+                Name = item.Name or "Unknown"
+            })
+            saveEmotesToData()
+
+            saveBtn.Text = "Saved!"
+            saveBtn.TextColor3 = Color3.fromRGB(70, 255, 130)
+            wait(1)
+            saveBtn.Text = "Save"
+            saveBtn.TextColor3 = Color3.fromRGB(70, 130, 255)
+        else
+            saveBtn.Text = "Already Saved"
+            wait(1)
+            saveBtn.Text = "Save"
+        end
+    end)
+
+    return card
+end
+
+-- === Saved card builder ===
+local function createSavedCard(item)
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(0, scale("X", 120), 0, scale("Y", 180))
+    card.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+
+    createCorner(card, 8)
+    
+
+    local thumbId = item.AssetId or item.Id
+    local img = Instance.new("ImageLabel")
+    img.Size = UDim2.new(1, -scale("X", 10), 0, scale("Y", 90))
+    img.Position = UDim2.new(0, scale("X", 5), 0, scale("Y", 5))
+    img.BackgroundTransparency = 1
+    img.ScaleType = Enum.ScaleType.Fit
+
+    pcall(function()
+        img.Image = "rbxthumb://type=Asset&id=" .. tostring(thumbId) .. "&w=150&h=150"
+    end)
+
+    if not img.Image or img.Image == "" then
+        img.Image = "rbxassetid://5902417546"
+    end
+
+    img.Parent = card
+    createCorner(img, 6)
+
+    local name = Instance.new("TextLabel")
+    name.Size = UDim2.new(1, -scale("X", 10), 0, scale("Y", 28))
+    name.Position = UDim2.new(0, scale("X", 5), 0, scale("Y", 100))
+    name.BackgroundTransparency = 1
+    name.Text = item.Name or "Unknown"
+    name.TextScaled = true
+    name.TextWrapped = true
+    name.Font = Enum.Font.GothamBold
+    name.TextColor3 = Color3.new(1, 1, 1)
+    name.Parent = card
+
+    local playBtn = Instance.new("TextButton")
+    playBtn.Size = UDim2.new(0.45, -scale("X", 5), 0, scale("Y", 24))
+    playBtn.Position = UDim2.new(0, scale("X", 5), 1, -scale("Y", 29))
+    playBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    playBtn.Text = "Play"
+    playBtn.Font = Enum.Font.GothamBold
+    playBtn.TextScaled = true
+    playBtn.TextColor3 = Color3.fromRGB(70, 255, 130)
+    playBtn.Parent = card
+
+    createCorner(playBtn, 6)
+    createStroke(playBtn, 2, Color3.fromRGB(70, 255, 130))
+
+    playBtn.MouseButton1Click:Connect(function()
+        LoadTrack(thumbId)
+    end)
+
+    local removeBtn = Instance.new("TextButton")
+    removeBtn.Size = UDim2.new(0.45, -scale("X", 5), 0, scale("Y", 24))
+    removeBtn.Position = UDim2.new(0.55, 0, 1, -scale("Y", 29))
+    removeBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    removeBtn.Text = "Remove"
+    removeBtn.Font = Enum.Font.GothamBold
+    removeBtn.TextScaled = true
+    removeBtn.TextColor3 = Color3.fromRGB(255, 70, 70)
+    removeBtn.Parent = card
+
+    createCorner(removeBtn, 6)
+    createStroke(removeBtn, 2, Color3.fromRGB(255, 70, 70))
+
+    removeBtn.MouseButton1Click:Connect(function()
+        for i, saved in ipairs(savedEmotes) do
+            if saved.Id == item.Id then
+                table.remove(savedEmotes, i)
+                saveEmotesToData()
+                refreshSavedTab()
+                break
+            end
+        end
+    end)
+
+    return card
+end
+
+-- === Refresh saved tab ===
+function refreshSavedTab()
+    for _, child in ipairs(savedScroll:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+
+    if savedEmotes and #savedEmotes > 0 then
+        savedEmptyLabel.Visible = false
+        for _, item in ipairs(savedEmotes) do
+            createSavedCard(item).Parent = savedScroll
+        end
+    else
+        savedEmptyLabel.Visible = true
+    end
+
+    savedScroll.CanvasSize = UDim2.new(0, 0, 0, savedLayout.AbsoluteContentSize.Y + 8)
+end
+
+-- === Update nav visibility ===
+local function updateNavVisibility()
+    prevBtn.Visible = (currentPageNumber > 1)
+    if currentPages and typeof(currentPages.IsFinished) == "boolean" then
+        nextBtn.Visible = not currentPages.IsFinished
+    else
+        nextBtn.Visible = true
+    end
+end
+
+local function showPage(pages)
+    for _, child in ipairs(scroll:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+
+    local currentList = nil
+    local ok, got = pcall(function() return pages:GetCurrentPage() end)
+    if ok then
+        currentList = got
+    else
+        warn("Failed to GetCurrentPage:", got)
+    end
+
+    if currentList and #currentList > 0 then
+        emptyLabel.Visible = false
+        for _, item in ipairs(currentList) do
+            createCard(item).Parent = scroll
+        end
+    else
+        emptyLabel.Visible = true
+    end
+
+    scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
+    pageLabel.Text = "Page " .. tostring(currentPageNumber)
+    updateNavVisibility()
+end
+
+local function fetchPagesTo(targetPage)
+    local pages = getPages(currentKeyword)
+    if not pages then return nil end
+    for i = 2, targetPage do
+        if pages.IsFinished then break end
+        local ok, err = pcall(function() pages:AdvanceToNextPageAsync() end)
+        if not ok then break end
+    end
+    return pages
+end
+
+-- === Event handlers ===
+local function doNewSearch(keyword)
+    currentKeyword = keyword or ""
+    currentPageNumber = 1
+    searchBox.Text = currentKeyword
+    currentPages = getPages(currentKeyword)
+    if currentPages then
+        showPage(currentPages)
+    end
+end
+
+searchBtn.MouseButton1Click:Connect(function()
+    doNewSearch(searchBox.Text)
+end)
+
+sortBtn.MouseButton1Click:Connect(function()
+    currentSortIndex = currentSortIndex % #sortModes + 1
+    sortBtn.Text = "Sort: " .. sortModes[currentSortIndex][2]
+    doNewSearch(currentKeyword)
+end)
+
+searchBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        doNewSearch(searchBox.Text)
+    end
+end)
+
+nextBtn.MouseButton1Click:Connect(function()
+    if not currentPages then return end
+    if currentPages.IsFinished then return end
+
+    local ok, err = pcall(function()
+        currentPages:AdvanceToNextPageAsync()
+    end)
+
+    if ok then
+        currentPageNumber = currentPageNumber + 1
+        showPage(currentPages)
+    else
+        warn("AdvanceToNextPageAsync failed")
+        local targetPage = currentPageNumber + 1
+        local fresh = fetchPagesTo(targetPage)
+        if fresh then
+            currentPages = fresh
+            currentPageNumber = math.min(targetPage, currentPageNumber + 1)
+            showPage(currentPages)
+        end
+    end
+end)
+
+prevBtn.MouseButton1Click:Connect(function()
+    if not currentPages then return end
+    if currentPageNumber <= 1 then return end
+
+    local ok, err = pcall(function()
+        currentPages:AdvanceToPreviousPageAsync()
+    end)
+
+    if ok then
+        currentPageNumber = math.max(1, currentPageNumber - 1)
+        showPage(currentPages)
+    else
+        warn("AdvanceToPreviousPageAsync failed")
+        local targetPage = math.max(1, currentPageNumber - 1)
+        local fresh = fetchPagesTo(targetPage)
+        if fresh then
+            currentPages = fresh
+            currentPageNumber = targetPage
+            showPage(currentPages)
+        end
+    end
+end)
+
+-- Tab switching
+catalogTabBtn.MouseButton1Click:Connect(function()
+    catalogFrame.Visible = true
+    savedFrame.Visible = false
+    catalogTabBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    catalogTabBtn.TextColor3 = Color3.fromRGB(70, 130, 255)
+    catalogTabBtn:FindFirstChildOfClass("UIStroke").Color = Color3.fromRGB(70, 130, 255)
+    savedTabBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    savedTabBtn.TextColor3 = Color3.new(0.8, 0.8, 0.8)
+    savedTabBtn:FindFirstChildOfClass("UIStroke").Color = Color3.fromRGB(50, 50, 60)
+end)
+
+savedTabBtn.MouseButton1Click:Connect(function()
+    catalogFrame.Visible = false
+    savedFrame.Visible = true
+    catalogTabBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    catalogTabBtn.TextColor3 = Color3.new(0.8, 0.8, 0.8)
+    catalogTabBtn:FindFirstChildOfClass("UIStroke").Color = Color3.fromRGB(50, 50, 60)
+    savedTabBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    savedTabBtn.TextColor3 = Color3.fromRGB(70, 130, 255)
+    savedTabBtn:FindFirstChildOfClass("UIStroke").Color = Color3.fromRGB(70, 130, 255)
+    refreshSavedTab()
+end)
+
+-- === Initial load ===
+doNewSearch("")

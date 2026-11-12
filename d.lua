@@ -1,1 +1,2073 @@
-do local environment=(type(getgenv)=="function"and getgenv())or _G local legacy=environment.__SIEXTHER_VIP_GLASS_V1 if type(legacy)=="table"then legacy.blurSize=0 end local compact=environment.__SXLG2 if type(compact)=="table"and compact.Backdrop then compact.Backdrop.Destroy()compact.Backdrop.Add=function()end compact.Backdrop.Remove=function()end compact.Backdrop.Refresh=function()end end local prior=environment.__SXLG3 if type(prior)=="table"and prior.Backdrop then prior.Backdrop.Destroy()prior.Backdrop.Add=function()end prior.Backdrop.Remove=function()end prior.Backdrop.Refresh=function()end end local motion=environment.__SXLG4 if type(motion)=="table"and motion.Backdrop then motion.Backdrop.Destroy()motion.Backdrop.Add=function()end motion.Backdrop.Remove=function()end motion.Backdrop.Refresh=function()end end local acrylic=environment.__SXLG5 if type(acrylic)=="table"and acrylic.Backdrop then acrylic.Backdrop.Destroy()acrylic.Backdrop.Add=function()end acrylic.Backdrop.Remove=function()end acrylic.Backdrop.Refresh=function()end end local dark=environment.__SXLG6 if type(dark)=="table"then if dark.Windows then dark.Windows.Destroy()end if dark.Backdrop then dark.Backdrop.Destroy()dark.Backdrop.Add=function()end dark.Backdrop.Remove=function()end dark.Backdrop.Refresh=function()end end end local oldBlur=game:GetService("Lighting"):FindFirstChild("__VIPGlass_Blur")if oldBlur then oldBlur:Destroy()end if not environment.__SXLG7 then environment.__SXLG7=(function()local nativeInstance=Instance local nativeLoadString=loadstring local nativeGetEnvironment=getfenv local nativeSetEnvironment=setfenv local scheduler=task local TweenService=game:GetService("TweenService")local Lighting=game:GetService("Lighting")local Glass={Version="VIPUNIV-NativePanelGlass-7.0",primaryColor=Color3.fromRGB(70,130,255),accentColor=Color3.fromRGB(100,200,255),bgColor=Color3.fromRGB(43,62,91),buttonColor=Color3.fromRGB(219,232,255),sectionColor=Color3.fromRGB(219,232,255),textColor=Color3.fromRGB(255,255,255),panelTransparency=0.48,cardTransparency=0.88,panelRadius=22,cardRadius=7,}local prefix="__VIPGlass_"local roots={}local objects=setmetatable({},{__mode="k"})local environmentCache=setmetatable({},{__mode="k"})local refreshQueued=false local styleObject,queueObject,refreshBlur local paintProperties={BackgroundColor3=true,BackgroundTransparency=true,BorderSizePixel=true,Font=true,TextColor3=true,TextStrokeTransparency=true,PlaceholderColor3=true,ImageColor3=true,ImageTransparency=true,ScrollBarImageColor3=true,AutoButtonColor=true,TextYAlignment=true,}local function own(object)return object.Name:sub(1,#prefix)==prefix end local function put(record,property,value)if not paintProperties[property]then return end record.output[property]=value if record.object[property]~=value then record.object[property]=value end end local function floatingSurface(object,root)if not object:IsA("GuiButton")and not object:IsA("Frame")then return false end local width,height local size=object.Size width=size.X.Scale==0 and size.X.Offset or object.AbsoluteSize.X height=size.Y.Scale==0 and size.Y.Offset or object.AbsoluteSize.Y if width<24 or height<24 or width>110 or height>110 then return false end if width/height<0.55 or width/height>1.8 then return false end if object:IsA("Frame")then local name=object.Name:lower()local named=name:find("float",1,true)or name:find("minimiz",1,true)or name:find("restore",1,true)if not named then local covered=false for _,child in ipairs(object:GetChildren())do if child:IsA("GuiButton")and child.Size.X.Scale>=0.9 and child.Size.Y.Scale>=0.9 then covered=true end end if not covered then return false end end end local parent=object.Parent while parent and parent~=root do if parent:IsA("GuiObject")then local state=objects[parent]local alpha=state and state.source.BackgroundTransparency or parent.BackgroundTransparency if alpha<1 then return false end end parent=parent.Parent end return parent==root end local function insideFloating(object,root)local parent=object.Parent while parent and parent~=root do local record=objects[parent]if record and record.floating then return true end parent=parent.Parent end return false end local function namedChild(object,class,name)local child=object:FindFirstChild(name)if not child then child=nativeInstance.new(class)child.Name=name child.Parent=object end return child end local function gradient(object,name,rotation,colors,alpha)local existing=object:FindFirstChild(prefix..name)if existing then return existing end local fill=namedChild(object,"UIGradient",prefix..name)fill.Rotation=rotation fill.Color=ColorSequence.new(colors)if alpha then fill.Transparency=NumberSequence.new(alpha)end return fill end local function visible(object,root)if not root.Parent or not root.Enabled then return false end local parent=object while parent and parent~=root do if parent:IsA("GuiObject")and not parent.Visible then return false end if parent:IsA("CanvasGroup")and parent.GroupTransparency>=1 then return false end parent=parent.Parent end return parent==root end local function dimensions(object)local size,absolute=object.Size,object.AbsoluteSize local width=absolute.X>0 and absolute.X or size.X.Offset local height=absolute.Y>0 and absolute.Y or size.Y.Offset return width,height end local function hasLayout(object)return object:FindFirstChildOfClass("UIListLayout")or object:FindFirstChildOfClass("UIGridLayout")or object:FindFirstChildOfClass("UIPageLayout")or object:FindFirstChildOfClass("UITableLayout")end local function skip(object,root)if root:GetAttribute("VIPGlassIgnore")then return true end local rootName=root.Name:lower()if rootName=="hannsiexther_crosshair"or rootName=="explorerselections"or rootName=="alignindicator"then return true end local current=object while current and current~=root do if current:GetAttribute("VIPGlassIgnore")or current:IsA("ViewportFrame")or current:IsA("BillboardGui")or current:IsA("SurfaceGui")or own(current)then return true end local name=current.Name:lower()if name=="crosshairpreview"or name=="crosshaircanvas"or name=="radarcanvas"or name=="radarmap"or name=="hue"or name=="saturation"or name=="colorwheel"or name=="colorchoice"or name:find("swatch",1,true)or name=="syntaxhighlight"then return true end current=current.Parent end return false end local function saturated(color)local _,saturation,value=color:ToHSV()return saturation>0.32 and value>0.22 end local function statusColor(color)local h,s,v=color:ToHSV()return s>0.4 and v>0.55 and(h<0.17 or(h>0.2 and h<0.48)or h>0.95)end local function hasOpaqueAncestor(object,root)local parent=object.Parent while parent and parent~=root do if parent:IsA("GuiObject")then local record=objects[parent]local alpha=record and record.source.BackgroundTransparency or parent.BackgroundTransparency if alpha<1 then return true end end parent=parent.Parent end return false end local function integratedBarFill(record)local object,parent=record.object,record.object.Parent if not object:IsA("Frame")or not parent or not parent:IsA("GuiObject")or hasLayout(parent)or record.source.BackgroundTransparency>=1 then return false end for _,child in ipairs(object:GetChildren())do if child:IsA("GuiObject")and not own(child)then return false end end local name,parentName=object.Name:lower(),parent.Name:lower()local header=parentName:find("header",1,true)or parentName:find("title",1,true)or parentName:find("topbar",1,true)if not header and not name:find("mask",1,true)and not name:find("fix",1,true)then return false end local w,h=dimensions(object)local pw,ph=dimensions(parent)if ph<=0 or w<pw*0.9 or h>ph*0.75 then return false end local source=objects[parent]and objects[parent].source local color=source and source.BackgroundColor3 or parent.BackgroundColor3 local ownColor=record.source.BackgroundColor3 return math.abs(color.R-ownColor.R)<0.025 and math.abs(color.G-ownColor.G)<0.025 and math.abs(color.B-ownColor.B)<0.025 end local function alignBar(record,height)local object=record.object if height>64 or object.TextWrapped or object.Text:find("\n",1,true)or record.source.Font==Enum.Font.Code or record.source.Font==Enum.Font.RobotoMono then return end local name,parentName=object.Name:lower(),object.Parent.Name:lower()if not object:IsA("GuiButton")and not object:IsA("TextBox")and not name:find("title",1,true)and not parentName:find("header",1,true)and not parentName:find("title",1,true)and parentName~="topbar"then return end put(record,"TextYAlignment",Enum.TextYAlignment.Center)local padding=object:FindFirstChildOfClass("UIPadding")if padding and padding.PaddingTop.Scale==0 and padding.PaddingBottom.Scale==0 then local middle=(padding.PaddingTop.Offset+padding.PaddingBottom.Offset)/2 padding.PaddingTop,padding.PaddingBottom=UDim.new(0,middle),UDim.new(0,middle)end end local function windowTransition(object,root)local current=object while current and current~=root do local record=objects[current]if record and record.windowOpening then return true end current=current.Parent end return false end function Glass.surface(object,transparency,radius,edge)object.BackgroundTransparency=transparency object.BorderSizePixel=0 local corner=object:FindFirstChildOfClass("UICorner")if not corner then corner=namedChild(object,"UICorner",prefix.."Corner")end corner.CornerRadius=UDim.new(0,radius)local stroke=namedChild(object,"UIStroke",prefix.."Edge")stroke.Enabled=true stroke.ApplyStrokeMode=Enum.ApplyStrokeMode.Border stroke.Color=Glass.primaryColor stroke.Thickness=radius>=14 and 0.8 or 0.55 stroke.Transparency=edge or 0.78 gradient(stroke,"GlassEdge",125,{ColorSequenceKeypoint.new(0,Color3.fromRGB(133,184,255)),ColorSequenceKeypoint.new(0.35,Glass.primaryColor),ColorSequenceKeypoint.new(0.75,Color3.fromRGB(55,108,211)),ColorSequenceKeypoint.new(1,Color3.fromRGB(139,194,255)),},{NumberSequenceKeypoint.new(0,0),NumberSequenceKeypoint.new(0.38,0.36),NumberSequenceKeypoint.new(0.72,0.78),NumberSequenceKeypoint.new(1,0.12),})end local function fill(record,panel)local object=record.object for _,child in ipairs(object:GetChildren())do if child:IsA("UIGradient")and not own(child)then child.Enabled=false end end local tint if panel then tint=gradient(object,"GlassTint",100,{ColorSequenceKeypoint.new(0,Color3.fromRGB(230,244,255)),ColorSequenceKeypoint.new(0.42,Color3.fromRGB(148,185,233)),ColorSequenceKeypoint.new(1,Color3.fromRGB(209,231,255)),})else tint=gradient(object,"GlassFill",105,{ColorSequenceKeypoint.new(0,Color3.fromRGB(255,255,255)),ColorSequenceKeypoint.new(0.48,Color3.fromRGB(183,207,243)),ColorSequenceKeypoint.new(1,Color3.fromRGB(235,244,255)),})end tint.Enabled=true return tint end local function clearSurface(record)local object=record.object for _,name in ipairs({"Edge","GlassTint","GlassFill"})do local child=object:FindFirstChild(prefix..name)if child then child.Enabled=false end end end local function paintFloating(record)local object=record.object clearSurface(record)put(record,"BackgroundColor3",Color3.fromRGB(240,244,250))put(record,"BackgroundTransparency",record.hovering and 0.8 or 0.86)local corner=object:FindFirstChildOfClass("UICorner")if not corner then corner=namedChild(object,"UICorner",prefix.."Corner")end corner.CornerRadius=UDim.new(1,0)local edge=namedChild(object,"UIStroke",prefix.."Edge")edge.Enabled=true edge.ApplyStrokeMode=Enum.ApplyStrokeMode.Border edge.Color=Color3.fromRGB(245,248,255)edge.Thickness=1 edge.Transparency=0.78 for _,child in ipairs(edge:GetChildren())do if child:IsA("UIGradient")then child.Enabled=false end end for _,child in ipairs(object:GetChildren())do if child:IsA("UIGradient")then child.Enabled=false end if child:IsA("UIStroke")and child~=edge then child.Enabled=false end end if object:IsA("TextButton")then put(record,"TextColor3",Glass.textColor)end end local function stopMotion(record,destroy)record.motionToken=(record.motionToken or 0)+1 record.motionRunning=false if record.motionConnection then record.motionConnection:Disconnect();record.motionConnection=nil end if record.motionTween then record.motionTween:Cancel();record.motionTween=nil end if record.motionDelay and scheduler.cancel then pcall(scheduler.cancel,record.motionDelay)end record.motionDelay=nil if record.motionLayer then record.motionLayer.Visible=false if destroy then record.motionLayer:Destroy();record.motionLayer=nil end elseif record.motionGradient then record.motionGradient.Offset=Vector2.new(0,0)if destroy and record.restTint then record.motionGradient.Color=record.restTint record.motionGradient.Rotation=record.restRotation end end if destroy then record.motionGradient=nil;record.restTint=nil;record.motionMode=nil end end local function syncMotion(record)local object=record.object if record.dead or not record.panel or not object.Parent then stopMotion(record,true);return end local mode=hasLayout(object)and"tint"or"sheen"if record.motionMode and record.motionMode~=mode then stopMotion(record,true)end if not record.motionGradient then record.motionMode=mode if mode=="sheen"then local layer=nativeInstance.new("Frame")layer.Name=prefix.."LiquidSheen"layer.Active=false layer.Selectable=false pcall(function()layer.Interactable=false end)layer.BackgroundColor3=Color3.fromRGB(178,219,255)layer.BackgroundTransparency=0.95 layer.BorderSizePixel=0 layer.Position=UDim2.fromOffset(0,0)layer.Size=UDim2.fromScale(1,1)layer.ZIndex=object.ZIndex local corner=namedChild(layer,"UICorner",prefix.."SheenCorner")corner.CornerRadius=UDim.new(0,Glass.panelRadius)local shine=gradient(layer,"SheenFade",-12,{ColorSequenceKeypoint.new(0,Glass.textColor),ColorSequenceKeypoint.new(1,Glass.textColor),},{NumberSequenceKeypoint.new(0,1),NumberSequenceKeypoint.new(0.40,1),NumberSequenceKeypoint.new(0.47,0.18),NumberSequenceKeypoint.new(0.53,0.18),NumberSequenceKeypoint.new(0.60,1),NumberSequenceKeypoint.new(1,1),})layer.Parent=object record.motionLayer,record.motionGradient=layer,shine else local tint=object:FindFirstChild(prefix.."GlassTint")if not tint then return end record.restTint=tint.Color record.restRotation=tint.Rotation tint.Rotation=-12 tint.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(148,185,233)),ColorSequenceKeypoint.new(0.40,Color3.fromRGB(148,185,233)),ColorSequenceKeypoint.new(0.48,Color3.fromRGB(230,244,255)),ColorSequenceKeypoint.new(0.52,Color3.fromRGB(230,244,255)),ColorSequenceKeypoint.new(0.60,Color3.fromRGB(148,185,233)),ColorSequenceKeypoint.new(1,Color3.fromRGB(148,185,233)),})record.motionGradient=tint end end if not visible(object,record.root)then stopMotion(record,false);return end if record.motionLayer then record.motionLayer.Visible=true end if record.motionRunning then return end record.motionRunning=true record.motionToken=(record.motionToken or 0)+1 local token=record.motionToken local function sweep()record.motionDelay=nil if record.dead or record.motionToken~=token or not visible(object,record.root)then return end local shine=record.motionGradient shine.Offset=Vector2.new(-1,0)local tween=TweenService:Create(shine,TweenInfo.new(1.7,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{Offset=Vector2.new(1,0)})record.motionTween=tween record.motionConnection=tween.Completed:Connect(function(state)if record.motionConnection then record.motionConnection:Disconnect();record.motionConnection=nil end if record.dead or record.motionToken~=token or state~=Enum.PlaybackState.Completed then return end record.motionTween=nil record.motionDelay=scheduler.delay(7,sweep)end)tween:Play()end sweep()end Glass.Backdrop=(function()local Backdrop={}local entries={}local lastError,warned local function eligible(record)if record.dead or not record.panel or not visible(record.object,record.root)then return false end local size,screen=Glass.Read(record.object,"AbsoluteSize"),record.root.AbsoluteSize if size.X<2 or size.Y<28 then return false end return not(size.X>=screen.X*0.9 and size.Y>=screen.Y*0.9)end local function create(entry)if entry.attempted then return end entry.attempted=true local blur local ok,message=pcall(function()blur=nativeInstance.new("UIBlur")blur.Name=prefix.."PanelBackdropV7"blur.Enabled=false blur.Color=Color3.new(1,1,1)blur.Strength=Enum.UIBlurStrength.Heavy blur.Transparency=0 blur.Parent=entry.record.object end)if ok then entry.component=blur;lastError=nil else if blur then blur:Destroy()end lastError=tostring(message)if not warned then warned=true warn("SIEXTHER: UIBlur lokal belum didukung klien ini. Tema kaca tetap aktif; tidak ada blur kamera pengganti.")end end end function Backdrop.Add(record)if not entries[record]then entries[record]={record=record}end end function Backdrop.Remove(record)local entry=entries[record]if entry and entry.component then entry.component:Destroy()end entries[record]=nil end function Backdrop.Refresh(active)for _,entry in pairs(entries)do local shown=active and eligible(entry.record)if entry.component and entry.component.Parent~=entry.record.object then entry.component:Destroy()entry.component,entry.attempted=nil,nil end if shown then create(entry)end local component=entry.component if component then component.Enabled=shown end end end function Backdrop.Destroy()local records={}for record in pairs(entries)do records[#records+1]=record end for _,record in ipairs(records)do Backdrop.Remove(record)end end function Backdrop.Status()local panels,configured,active=0,0,0 for _,entry in pairs(entries)do panels=panels+1 if entry.component then configured=configured+1 if entry.component.Enabled then active=active+1 end end end return{Backend="native-panel-only",Panels=panels,Configured=configured,Active=active,LastError=lastError,RenderingVerified=false,CameraEffects=false}end return Backdrop end)()Glass.Windows=(function()local WindowFX={}local ghosts={}local function totalScale(object)local result,current=1,object while current and current:IsA("GuiObject")do local scale=current:FindFirstChildOfClass("UIScale")if scale then result=result*scale.Scale end current=current.Parent end return math.max(result,0.001)end local function clearGhost(record)local ghost=record.windowGhost if not ghost then return end record.windowGhost=nil ghosts[ghost]=nil if ghost.connection then ghost.connection:Disconnect()end for _,tween in ipairs(ghost.tweens or{})do tween:Cancel()end ghost.gui:Destroy()end function WindowFX.Stop(record)local motion=record.windowOpening if not motion then return end record.windowOpening=nil if motion.connection then motion.connection:Disconnect()end for _,tween in ipairs(motion.tweens)do tween:Cancel()end if record.object.Parent then record.object.Position=motion.rest end if motion.created then motion.scale:Destroy()elseif motion.scale.Parent then motion.scale.Scale=motion.base end end local function snapshot(record)local object,root=record.object,record.root if not object.Parent or not root.Parent or object.AbsoluteSize.X<2 or object.AbsoluteSize.Y<2 then return end local clone local archivable=object.Archivable local ok=pcall(function()object.Archivable=true clone=object:Clone()end)object.Archivable=archivable if not ok or not clone then return end local position,size=object.AbsolutePosition,object.AbsoluteSize local scale=totalScale(object)local origin=root.AbsolutePosition local gui=nativeInstance.new("ScreenGui")gui.Name=prefix.."ClosingWindow"gui.ResetOnSpawn=false gui.IgnoreGuiInset=root.IgnoreGuiInset pcall(function()gui.ScreenInsets=root.ScreenInsets gui.ClipToDeviceSafeArea=root.ClipToDeviceSafeArea gui.SafeAreaCompatibility=root.SafeAreaCompatibility end)gui.ZIndexBehavior=root.ZIndexBehavior gui.DisplayOrder=root.DisplayOrder+1 local group=nativeInstance.new("CanvasGroup")group.Name=prefix.."ClosingVisual"group.BackgroundTransparency=1 group.BorderSizePixel=0 group.Active,group.Selectable=false,false pcall(function()group.Interactable=false end)group.AnchorPoint=Vector2.new(0.5,0.5)group.Position=UDim2.fromOffset(position.X-origin.X+size.X/2,position.Y-origin.Y+size.Y/2)group.Size=UDim2.fromOffset(size.X/scale,size.Y/scale)group.GroupTransparency=0 local spring=nativeInstance.new("UIScale")spring.Name=prefix.."ClosingScale"spring.Scale=scale spring.Parent=group local ownScale=clone:FindFirstChildOfClass("UIScale")if ownScale then ownScale:Destroy()end clone.Name=prefix.."ClosingPanel"clone.AnchorPoint=Vector2.new(0,0)clone.Position=UDim2.fromOffset(0,0)clone.Size=UDim2.fromScale(1,1)clone.Visible=true clone.Active,clone.Selectable=false,false pcall(function()clone.Interactable=false end)for _,child in ipairs(clone:GetDescendants())do if child:IsA("LuaSourceContainer")then child:Destroy()elseif child:IsA("GuiObject")then child.Active,child.Selectable=false,false pcall(function()child.Interactable=false end)if child:IsA("ScrollingFrame")then child.ScrollingEnabled=false end end end clone.Parent=group group.Parent=gui gui.Parent=root.Parent return gui,group,spring,scale end function WindowFX.Close(record)if record.windowGhost or not record.windowShown then return end record.windowShown=false local gui,group,spring,scale=snapshot(record)WindowFX.Stop(record)if not gui then return end local position=group.Position local fade=TweenService:Create(group,TweenInfo.new(0.26,Enum.EasingStyle.Quart,Enum.EasingDirection.In),{GroupTransparency=1,Position=UDim2.new(position.X.Scale,position.X.Offset,position.Y.Scale,position.Y.Offset+12),})local shrink=TweenService:Create(spring,TweenInfo.new(0.26,Enum.EasingStyle.Quart,Enum.EasingDirection.In),{Scale=scale*0.88})local ghost={gui=gui,tweens={fade,shrink},record=record}record.windowGhost=ghost ghosts[ghost]=true ghost.connection=fade.Completed:Connect(function(state)if state==Enum.PlaybackState.Completed and record.windowGhost==ghost then clearGhost(record)end end)shrink:Play()fade:Play()end local function open(record)clearGhost(record)WindowFX.Stop(record)local object=record.object local state=roots[record.root]if state then for _,child in pairs(state.panels)do if child~=record and child.object:IsDescendantOf(object)then WindowFX.Stop(child)end end end local scale=object:FindFirstChildOfClass("UIScale")local created=not scale if not scale then scale=nativeInstance.new("UIScale")scale.Name=prefix.."WindowSpring"scale.Parent=object end local base,rest=scale.Scale,object.Position local motion={scale=scale,base=base,rest=rest,created=created,tweens={}}record.windowOpening=motion object.Position=UDim2.new(rest.X.Scale,rest.X.Offset,rest.Y.Scale,rest.Y.Offset+18)scale.Scale=base*0.84 local position=TweenService:Create(object,TweenInfo.new(0.44,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),{Position=rest})local spring=TweenService:Create(scale,TweenInfo.new(0.46,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Scale=base})motion.tweens={position,spring}motion.connection=spring.Completed:Connect(function(state)if state==Enum.PlaybackState.Completed and record.windowOpening==motion then WindowFX.Stop(record)end end)position:Play()spring:Play()end function WindowFX.Sync(record)if record.dead or not record.panel then return end local shown=visible(record.object,record.root)if shown==record.windowShown then return end if shown then record.windowShown=true if not windowTransition(record.object.Parent,record.root)then open(record)end else WindowFX.Close(record)end end function WindowFX.CloseTree(state,object)if not state then return end local function included(record)return not object or record.object==object or record.object:IsDescendantOf(object)end local top={}for _,record in pairs(state.panels)do if record.windowShown and included(record)then local parent,bundled=record.object.Parent,false while parent and parent~=record.root do local ancestor=state.panels[parent]if ancestor and ancestor.windowShown and included(ancestor)then bundled=true;break end parent=parent.Parent end if bundled then record.windowShown=false WindowFX.Stop(record)clearGhost(record)else top[#top+1]=record end end end for _,record in ipairs(top)do WindowFX.Close(record)end end function WindowFX.Forget(record)WindowFX.Stop(record)record.windowShown=false end function WindowFX.Geometry(object,property)local record=objects[object]if not record then return end local current=object while current and current~=record.root do local owner=objects[current]local motion=owner and owner.windowOpening if motion then local factor=motion.scale.Scale/math.max(motion.base,0.001)if factor<=0 then return end local size=object.AbsoluteSize if property=="AbsoluteSize"then return Vector2.new(size.X/factor,size.Y/factor)end local window,parent=owner.object,owner.object.Parent local p,area=parent.AbsolutePosition,parent.AbsoluteSize local parentScale=totalScale(parent)local rest,windowSize=motion.rest,window.AbsoluteSize local x=p.X+area.X*rest.X.Scale+rest.X.Offset*parentScale-windowSize.X/factor*window.AnchorPoint.X local y=p.Y+area.Y*rest.Y.Scale+rest.Y.Offset*parentScale-windowSize.Y/factor*window.AnchorPoint.Y local a,b=object.AbsolutePosition,window.AbsolutePosition return Vector2.new(x+(a.X-b.X)/factor,y+(a.Y-b.Y)/factor)end current=current.Parent end end function WindowFX.Destroy()local records={}for ghost in pairs(ghosts)do records[#records+1]=ghost.record end for _,record in ipairs(records)do clearGhost(record)end end return WindowFX end)()local function setPanel(record,isPanel)record.panel=isPanel record.backdrop=isPanel local state=roots[record.root]if state then state.panels[record.object]=isPanel and record or nil end if isPanel then Glass.Backdrop.Add(record)else Glass.Backdrop.Remove(record);stopMotion(record,true);Glass.Windows.Forget(record)end end local function watch(record,signal,callback)record.connections[#record.connections+1]=signal:Connect(callback)end local function dispose(record)if record.dead then return end record.dead=true for _,connection in ipairs(record.connections)do connection:Disconnect()end record.connections={}Glass.Windows.Stop(record)stopMotion(record,true)Glass.Backdrop.Remove(record)objects[record.object]=nil local root=roots[record.root]if root then root.objects[record.object]=nil;root.panels[record.object]=nil end end styleObject=function(record)local object,root=record.object,record.root if record.dead or not object.Parent or not object:IsDescendantOf(root)or skip(object,root)then if record.panel then setPanel(record,false)end return end local source=record.source local width,height=dimensions(object)local logicalHeight=object.Size.Y.Scale==0 and object.Size.Y.Offset or height local name=object.Name:lower()local text=object:IsA("TextLabel")or object:IsA("TextButton")or object:IsA("TextBox")local image=object:IsA("ImageLabel")or object:IsA("ImageButton")local button=object:IsA("GuiButton")local imageSurface=image and logicalHeight>=48 and object.Image~=""and not name:find("shadow",1,true)and not name:find("glow",1,true)and(object.ScaleType==Enum.ScaleType.Slice or name=="main"or name=="window"or name=="background"or name=="mainframe")record.writing=true put(record,"BorderSizePixel",0)if text then if source.Font~=Enum.Font.Code and source.Font~=Enum.Font.RobotoMono then put(record,"Font",Enum.Font.GothamBold)end put(record,"TextColor3",statusColor(source.TextColor3)and source.TextColor3 or Glass.textColor)put(record,"TextStrokeTransparency",1)alignBar(record,logicalHeight)if object:IsA("TextBox")then put(record,"PlaceholderColor3",Color3.fromRGB(180,191,210))end for _,child in ipairs(object:GetChildren())do if child:IsA("UIGradient")and not own(child)then child.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Glass.textColor),ColorSequenceKeypoint.new(0.3,Glass.primaryColor),ColorSequenceKeypoint.new(0.6,Glass.primaryColor),ColorSequenceKeypoint.new(1,Glass.textColor),})end end end if object:IsA("ScrollingFrame")then put(record,"ScrollBarImageColor3",Glass.primaryColor)end if button then put(record,"AutoButtonColor",false)end if integratedBarFill(record)then setPanel(record,false)clearSurface(record)put(record,"BackgroundTransparency",1)for _,child in ipairs(object:GetChildren())do if child:IsA("UIStroke")then child.Enabled=false end end record.writing=false return end if insideFloating(object,root)then setPanel(record,false)clearSurface(record)put(record,"BackgroundTransparency",1)if text then put(record,"TextColor3",Glass.textColor)end for _,child in ipairs(object:GetChildren())do if child:IsA("UIStroke")then child.Enabled=false end end record.writing=false return end local wasFloating=record.floating record.floating=source.BackgroundTransparency<1 and floatingSurface(object,root)if wasFloating~=record.floating then for _,child in ipairs(object:GetChildren())do if child:IsA("GuiObject")then queueObject(root,child)end end end if record.floating then setPanel(record,false)paintFloating(record)record.writing=false return end if image and object.Image~=""and not imageSurface then setPanel(record,false)if source.BackgroundTransparency<1 then put(record,"BackgroundColor3",Glass.buttonColor)put(record,"BackgroundTransparency",Glass.cardTransparency)record.output.BackgroundTransparency=Glass.cardTransparency Glass.surface(object,Glass.cardTransparency,Glass.cardRadius,0.76)end record.writing=false return end local transparent=not imageSurface and source.BackgroundTransparency>=1 local compact=object.Size.Y.Scale==0 and height>0 and height<=10 local knob=name:find("knob",1,true)or name:find("dragger",1,true)or name:find("thumb",1,true)or name=="toggleindicator"local track=(name:find("switch",1,true)or name:find("toggle",1,true))and width<=70 and height<=30 if not track and button and text and object.Text==""and width>22 and width<=65 and height>12 and height<=28 and#object:GetChildren()>0 then track=true end local panel=not transparent and(object:IsA("Frame")or object:IsA("CanvasGroup")or imageSurface)and not object:IsA("ScrollingFrame")and not compact and not knob and not track and(((not hasOpaqueAncestor(object,root))and(logicalHeight>=48 or object.Size.Y.Scale>0))or((name:find("popup",1,true)or name:find("modal",1,true)or name=="mainframe"or name=="window")and logicalHeight>=48))if imageSurface then put(record,"ImageTransparency",1)end setPanel(record,panel)if transparent then clearSurface(record)put(record,"BackgroundTransparency",1)elseif compact or knob or track then clearSurface(record)local active=saturated(source.BackgroundColor3)local color=knob and Glass.textColor or(active and Glass.primaryColor or Color3.fromRGB(176,189,211))local alpha=knob and 0 or(track and(active and 0.08 or 0.7)or(active and 0 or 0.8))put(record,"BackgroundColor3",color)put(record,"BackgroundTransparency",alpha)local corner=object:FindFirstChildOfClass("UICorner")if corner then corner.CornerRadius=UDim.new(1,0)end else local active=not panel and button and saturated(source.BackgroundColor3)local section=not panel and(name:find("sidebar",1,true)or name:find("header",1,true)or name=="topbar"or name=="titlebar"or name=="sxthr")local search=object:IsA("TextBox")or name:find("search",1,true)local alpha=panel and Glass.panelTransparency or(active and 0.28 or(section and 0.94 or(search and 0.9 or Glass.cardTransparency)))local color=panel and Glass.bgColor or(active and Glass.primaryColor or(section and Glass.sectionColor or Glass.buttonColor))put(record,"BackgroundColor3",color)put(record,"BackgroundTransparency",record.hovering and not panel and math.min(alpha,0.84)or alpha)local actualAlpha=record.output.BackgroundTransparency Glass.surface(object,actualAlpha,panel and Glass.panelRadius or Glass.cardRadius,panel and 0.36 or 0.76)record.output.BackgroundTransparency=actualAlpha fill(record,panel)end for _,child in ipairs(object:GetChildren())do if child:IsA("UIStroke")and not own(child)then child.Enabled=false end end record.writing=false if panel then syncMotion(record);Glass.Windows.Sync(record)end end queueObject=function(root,object)local state=roots[root]if not state or state.dead or own(object)then return end if not object:IsA("GuiObject")then if object.Parent and object.Parent:IsA("GuiObject")then queueObject(root,object.Parent)end return end if skip(object,root)then return end local record=objects[object]if record and record.root~=root then dispose(record);record=nil end if not record then state.serial=state.serial+1 record={object=object,root=root,source={},output={},connections={},id=state.serial}objects[object]=record state.objects[object]=record local properties={"BackgroundColor3","BackgroundTransparency","BorderSizePixel"}if object:IsA("TextLabel")or object:IsA("TextBox")or object:IsA("TextButton")then for _,property in ipairs({"TextColor3","Font","TextStrokeTransparency","TextYAlignment"})do properties[#properties+1]=property end end if object:IsA("ScrollingFrame")then properties[#properties+1]="ScrollBarImageColor3"properties[#properties+1]="ScrollBarThickness"end for _,property in ipairs(properties)do record.source[property]=object[property]watch(record,object:GetPropertyChangedSignal(property),function()if record.dead or record.writing or object[property]==record.output[property]then return end record.source[property]=object[property]queueObject(root,object)end)end for _,property in ipairs({"Visible","Size","AbsoluteSize","ClipsDescendants","Name"})do watch(record,object:GetPropertyChangedSignal(property),function()if not record.dead then if property=="AbsoluteSize"and windowTransition(object,root)then return end if property=="Visible"then if object.Visible then Glass.Windows.Sync(record)else Glass.Windows.CloseTree(roots[root],object)end end queueObject(root,object);refreshBlur()end end)end for _,property in ipairs({"Position","AnchorPoint"})do watch(record,object:GetPropertyChangedSignal(property),function()if not record.dead and record.panel then refreshBlur()end end)end if object:IsA("CanvasGroup")then watch(record,object:GetPropertyChangedSignal("GroupTransparency"),refreshBlur)end watch(record,object.Destroying,function()if record.panel then Glass.Windows.CloseTree(roots[root],object)end dispose(record);refreshBlur()end)if object:IsA("GuiButton")then watch(record,object.MouseEnter,function()record.hovering=true;queueObject(root,object)end)watch(record,object.MouseLeave,function()record.hovering=false;queueObject(root,object)end)end end state.pending[object]=record if state.queued then return end state.queued=true scheduler.defer(function()if state.dead then return end state.queued=false local pending=state.pending state.pending={}local count=0 for _,item in pairs(pending)do if not item.dead then styleObject(item)end count=count+1 if count%80==0 then scheduler.wait()end end refreshBlur()end)end refreshBlur=function()if refreshQueued then return end refreshQueued=true scheduler.defer(function()refreshQueued=false local active,any=false,false for root,state in pairs(roots)do if not state.dead then any=true for _,record in pairs(state.panels)do if record.backdrop and not record.dead then Glass.Windows.Sync(record)syncMotion(record)local _,height=dimensions(record.object)local shown=visible(record.object,root)local actual=record.object.AbsoluteSize if shown and actual.X>=2 and actual.Y>=28 then active=true end end end end end Glass.Backdrop.Refresh(active)if not any then Glass.Backdrop.Destroy()end end)end function Glass.attach(root)if not root:IsA("ScreenGui")or roots[root]then return root end local state={objects={},panels={},pending={},connections={},serial=0}roots[root]=state local function connect(signal,callback)state.connections[#state.connections+1]=signal:Connect(callback)end local function scan()if state.dead then return end for _,object in ipairs(root:GetDescendants())do if not own(object)then queueObject(root,object)end end refreshBlur()end connect(root.DescendantAdded,function(object)queueObject(root,object)end)connect(root.DescendantRemoving,function(object)local record=objects[object]if record and record.root==root then scheduler.defer(function()if not record.dead and not object:IsDescendantOf(root)then dispose(record);refreshBlur()end end)end end)connect(root:GetPropertyChangedSignal("Enabled"),function()if root.Enabled then for _,record in pairs(state.panels)do Glass.Windows.Sync(record)end else Glass.Windows.CloseTree(state)end refreshBlur()end)connect(root:GetPropertyChangedSignal("Name"),scan)connect(root:GetPropertyChangedSignal("AbsoluteSize"),refreshBlur)connect(root.AncestryChanged,refreshBlur)connect(root.Destroying,function()Glass.Windows.CloseTree(state)state.dead=true for _,connection in ipairs(state.connections)do connection:Disconnect()end local toRemove={}for _,record in pairs(state.objects)do toRemove[#toRemove+1]=record end for _,record in ipairs(toRemove)do dispose(record)end roots[root]=nil refreshBlur()end)scheduler.defer(scan)return root end function Glass.Destroy(object)local state=roots[object]if state then Glass.Windows.CloseTree(state)else local record=objects[object]if record then local root=roots[record.root]if root then Glass.Windows.CloseTree(root,object)end end end return object:Destroy()end Glass.Instance=setmetatable({},{__index=nativeInstance})function Glass.Instance.new(class,parent)local object=nativeInstance.new(class)if class=="ScreenGui"then Glass.attach(object)end if parent then object.Parent=parent end return object end local function environmentFor(base)base=base or _G local cached=environmentCache[base]if cached then return cached end local wrapped=setmetatable({},{__index=function(_,key)if key=="Instance"then return Glass.Instance end if key=="loadstring"then return Glass.LoadString end if key=="getfenv"then return Glass.GetEnvironment end return base[key]end,__newindex=function(_,key,value)base[key]=value end,})environmentCache[base]=wrapped environmentCache[wrapped]=wrapped return wrapped end function Glass.GetEnvironment(level)local base if nativeGetEnvironment then if level==nil then base=nativeGetEnvironment(2)elseif type(level)=="number"then base=nativeGetEnvironment(level==0 and 0 or level+1)else base=nativeGetEnvironment(level)end end return environmentFor(base)end function Glass.LoadString(source,chunkName)local compiled,message=nativeLoadString(source,chunkName)if compiled and nativeSetEnvironment then local base=nativeGetEnvironment and nativeGetEnvironment(compiled)or _G nativeSetEnvironment(compiled,environmentFor(base))end return compiled,message end function Glass.Read(object,property)local record=objects[object]if property=="AbsoluteSize"or property=="AbsolutePosition"then local geometry=Glass.Windows.Geometry(object,property)if geometry then return geometry end end if record and record.source[property]~=nil and object[property]==record.output[property]then return record.source[property]end return object[property]end return Glass end)()end __SXLG7=environment.__SXLG7 end function missing(t,f,fallback)if type(f)==t then return f end return fallback end cloneref=missing("function",cloneref,function(...)return...end)local Services=setmetatable({},{__index=function(_,name)return cloneref(game:GetService(name))end})local Players=Services.Players local RunService=Services.RunService local UserInputService=Services.UserInputService local TweenService=Services.TweenService local StarterGui=Services.StarterGui local player=Players.LocalPlayer local character=player.Character or player.CharacterAdded:Wait()local humanoid=character:WaitForChild("Humanoid")local Settings={["Fade In"]=0.1,["Fade Out"]=0.1,["Weight"]=1,["Speed"]=1,["Allow Invisible"]=true,["Time Position"]=0.99}local EMOTE_ID="70883871260184"local isGlitchActive=false local CurrentTrack local lastPosition=character.PrimaryPart and character.PrimaryPart.Position or Vector3.new()local freeCamEnabled=false local freeCamConnection local keysDown={}local rotating=false local touchPos local onMobile=not UserInputService.KeyboardEnabled local freeCamSpeed=25 local freeCamSens=0.3 local originalWalkSpeed=16 local originalJumpPower=50 local originalJumpHeight=7.2 local originalCamera=workspace.CurrentCamera.CameraType local shunshinActive=false local shunshinLoop=false freeCamSpeed=freeCamSpeed/25 if onMobile then freeCamSens=freeCamSens*2 end local function isInCorrectMap()return game.PlaceId==6358567974 end player.CharacterAdded:Connect(function(newCharacter)character=newCharacter humanoid=character:WaitForChild("Humanoid")task.wait(0.1)if freeCamEnabled then humanoid.WalkSpeed=0 humanoid.JumpPower=0 humanoid.JumpHeight=0 end end)local function LoadTrack(id)if CurrentTrack then CurrentTrack:Stop(Settings["Fade Out"])end local animId="rbxassetid://"..tostring(id)local newAnim=__SXLG7.Instance.new("Animation")newAnim.AnimationId=animId local animator=humanoid:FindFirstChildOfClass("Animator")if not animator then animator=__SXLG7.Instance.new("Animator")animator.Parent=humanoid end local newTrack=animator:LoadAnimation(newAnim)newTrack.Priority=Enum.AnimationPriority.Action4 local weight=Settings["Weight"]if weight==0 then weight=0.001 end newTrack:Play(Settings["Fade In"],weight,Settings["Speed"])CurrentTrack=newTrack if newTrack.Length>0 then newTrack.TimePosition=math.clamp(Settings["Time Position"],0,1)*newTrack.Length end task.delay(1,function()if CurrentTrack and CurrentTrack==newTrack and CurrentTrack.IsPlaying then CurrentTrack:AdjustSpeed(0)end end)return newTrack end local function StopTrack()if CurrentTrack then CurrentTrack:Stop(Settings["Fade Out"])CurrentTrack=nil end end local function SmoothTween(obj,time,properties)local tween=TweenService:Create(obj,TweenInfo.new(time,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),properties)tween:Play()return tween end local function freeCamRenderStep()local cam=workspace.CurrentCamera if rotating then local delta=UserInputService:GetMouseDelta()local cf=cam.CFrame local yAngle=cf:ToEulerAngles(Enum.RotationOrder.YZX)local newAmount=math.deg(yAngle)+delta.Y if newAmount>65 or newAmount<-65 then if not(yAngle<0 and delta.Y<0)and not(yAngle>0 and delta.Y>0)then delta=Vector2.new(delta.X,0)end end cf=cf*CFrame.Angles(-math.rad(delta.Y),0,0)cf=CFrame.Angles(0,-math.rad(delta.X),0)*(cf-cf.Position)+cf.Position cf=CFrame.lookAt(cf.Position,cf.Position+cf.LookVector)if delta~=Vector2.new(0,0)then cam.CFrame=cam.CFrame:Lerp(cf,freeCamSens)end UserInputService.MouseBehavior=Enum.MouseBehavior.LockCurrentPosition else UserInputService.MouseBehavior=Enum.MouseBehavior.Default end if keysDown["Enum.KeyCode.W"]then cam.CFrame=cam.CFrame*CFrame.new(Vector3.new(0,0,-freeCamSpeed))end if keysDown["Enum.KeyCode.A"]then cam.CFrame=cam.CFrame*CFrame.new(Vector3.new(-freeCamSpeed,0,0))end if keysDown["Enum.KeyCode.S"]then cam.CFrame=cam.CFrame*CFrame.new(Vector3.new(0,0,freeCamSpeed))end if keysDown["Enum.KeyCode.D"]then cam.CFrame=cam.CFrame*CFrame.new(Vector3.new(freeCamSpeed,0,0))end end local function enableFreeCam()if freeCamEnabled then return end freeCamEnabled=true if player.Character then local hum=player.Character:FindFirstChildOfClass("Humanoid")if hum then originalWalkSpeed=hum.WalkSpeed originalJumpPower=hum.JumpPower originalJumpHeight=hum.JumpHeight hum.WalkSpeed=0 hum.JumpPower=0 hum.JumpHeight=0 end end workspace.CurrentCamera.CameraType=Enum.CameraType.Scriptable freeCamConnection=RunService.RenderStepped:Connect(freeCamRenderStep)end local function disableFreeCam()if not freeCamEnabled then return end freeCamEnabled=false if freeCamConnection then freeCamConnection:Disconnect()freeCamConnection=nil end if player.Character then local hum=player.Character:FindFirstChildOfClass("Humanoid")if hum then hum.WalkSpeed=originalWalkSpeed hum.JumpPower=originalJumpPower hum.JumpHeight=originalJumpHeight end end if player.Character then workspace.CurrentCamera.CameraSubject=player.Character:FindFirstChildOfClass("Humanoid")end workspace.CurrentCamera.CameraType=originalCamera keysDown={}rotating=false end local validKeys={"Enum.KeyCode.W","Enum.KeyCode.A","Enum.KeyCode.S","Enum.KeyCode.D"}UserInputService.InputBegan:Connect(function(Input)if not freeCamEnabled then return end for _,key in pairs(validKeys)do if key==tostring(Input.KeyCode)then keysDown[key]=true end end if Input.UserInputType==Enum.UserInputType.MouseButton2 or(Input.UserInputType==Enum.UserInputType.Touch and UserInputService:GetMouseLocation().X>(workspace.CurrentCamera.ViewportSize.X/2))then rotating=true end if Input.UserInputType==Enum.UserInputType.Touch then if Input.Position.X<workspace.CurrentCamera.ViewportSize.X/2 then touchPos=Input.Position end end end)UserInputService.InputEnded:Connect(function(Input)if not freeCamEnabled then return end for key in pairs(keysDown)do if key==tostring(Input.KeyCode)then keysDown[key]=false end end if Input.UserInputType==Enum.UserInputType.MouseButton2 or(Input.UserInputType==Enum.UserInputType.Touch and UserInputService:GetMouseLocation().X>(workspace.CurrentCamera.ViewportSize.X/2))then rotating=false end if Input.UserInputType==Enum.UserInputType.Touch and touchPos then if Input.Position.X<workspace.CurrentCamera.ViewportSize.X/2 then touchPos=nil keysDown["Enum.KeyCode.W"]=false keysDown["Enum.KeyCode.A"]=false keysDown["Enum.KeyCode.S"]=false keysDown["Enum.KeyCode.D"]=false end end end)UserInputService.TouchMoved:Connect(function(input)if not freeCamEnabled then return end if touchPos then if input.Position.X<workspace.CurrentCamera.ViewportSize.X/2 then if input.Position.Y<touchPos.Y then keysDown["Enum.KeyCode.W"]=true keysDown["Enum.KeyCode.S"]=false else keysDown["Enum.KeyCode.W"]=false keysDown["Enum.KeyCode.S"]=true end if input.Position.X<(touchPos.X-15)then keysDown["Enum.KeyCode.A"]=true keysDown["Enum.KeyCode.D"]=false elseif input.Position.X>(touchPos.X+15)then keysDown["Enum.KeyCode.A"]=false keysDown["Enum.KeyCode.D"]=true else keysDown["Enum.KeyCode.A"]=false keysDown["Enum.KeyCode.D"]=false end end end end)local screenGui=__SXLG7.Instance.new("ScreenGui")screenGui.Name="SiextherByHann.Sxthr"screenGui.ResetOnSpawn=false screenGui.Parent=Services.CoreGui local mainFrame=__SXLG7.Instance.new("Frame")mainFrame.Size=UDim2.new(0,240,0,253)mainFrame.Position=UDim2.new(0.5,-120,0.5,-143)mainFrame.BackgroundColor3=Color3.fromRGB(15,18,25)mainFrame.BorderSizePixel=0 mainFrame.Active=true mainFrame.Draggable=true mainFrame.ClipsDescendants=false mainFrame.Parent=screenGui local mainCorner=__SXLG7.Instance.new("UICorner",mainFrame)mainCorner.CornerRadius=UDim.new(0,10)local mainStroke=__SXLG7.Instance.new("UIStroke",mainFrame)mainStroke.Color=Color3.fromRGB(70,130,255)mainStroke.Thickness=2 local minimizeBtn=__SXLG7.Instance.new("TextButton")minimizeBtn.Size=UDim2.new(0,26,0,26)minimizeBtn.Position=UDim2.new(1,-60,0,6)minimizeBtn.BackgroundColor3=Color3.fromRGB(60,120,200)minimizeBtn.Text="–"minimizeBtn.TextColor3=Color3.fromRGB(255,255,255)minimizeBtn.Font=Enum.Font.GothamBold minimizeBtn.TextSize=18 minimizeBtn.ZIndex=10 minimizeBtn.Parent=mainFrame local minimizeCorner=__SXLG7.Instance.new("UICorner",minimizeBtn)minimizeCorner.CornerRadius=UDim.new(0,6)local closeBtn=__SXLG7.Instance.new("TextButton")closeBtn.Size=UDim2.new(0,26,0,26)closeBtn.Position=UDim2.new(1,-30,0,6)closeBtn.BackgroundColor3=Color3.fromRGB(180,40,40)closeBtn.Text="X"closeBtn.TextColor3=Color3.fromRGB(255,255,255)closeBtn.Font=Enum.Font.GothamBold closeBtn.TextSize=16 closeBtn.ZIndex=10 closeBtn.Parent=mainFrame local closeCorner=__SXLG7.Instance.new("UICorner",closeBtn)closeCorner.CornerRadius=UDim.new(0,6)local minimizedBtn=__SXLG7.Instance.new("TextButton")minimizedBtn.Size=UDim2.new(0,41,0,41)minimizedBtn.Position=UDim2.new(0,15,0,60)minimizedBtn.BackgroundColor3=Color3.fromRGB(25,25,35)minimizedBtn.Text="SX"minimizedBtn.TextColor3=Color3.fromRGB(70,130,255)minimizedBtn.Font=Enum.Font.GothamBold minimizedBtn.TextSize=25 minimizedBtn.Visible=false minimizedBtn.Active=true minimizedBtn.Draggable=true minimizedBtn.Parent=screenGui minimizedBtn.ZIndex=5 local MinimizedGradient=__SXLG7.Instance.new("UIGradient")MinimizedGradient.Parent=minimizedBtn MinimizedGradient.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(255,255,255)),ColorSequenceKeypoint.new(0.3,Color3.fromRGB(70,130,255)),ColorSequenceKeypoint.new(0.6,Color3.fromRGB(70,130,255)),ColorSequenceKeypoint.new(1,Color3.fromRGB(255,255,255))})MinimizedGradient.Offset=Vector2.new(-1,0)task.spawn(function()while minimizedBtn and minimizedBtn.Parent do TweenService:Create(MinimizedGradient,TweenInfo.new(2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{Offset=Vector2.new(1,0)}):Play()task.wait(2)TweenService:Create(MinimizedGradient,TweenInfo.new(2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{Offset=Vector2.new(-1,0)}):Play()task.wait(2)end end)local minimizedCorner=__SXLG7.Instance.new("UICorner",minimizedBtn)minimizedCorner.CornerRadius=UDim.new(0,12)local title=__SXLG7.Instance.new("TextLabel")title.Size=UDim2.new(1,-95,0,30)title.Position=UDim2.new(0,0,0,0)title.BackgroundTransparency=1 title.Text="SIEXTHER GLITCH"title.Font=Enum.Font.GothamBold title.TextSize=16 title.TextColor3=Color3.fromRGB(70,130,255)title.Parent=mainFrame local TitleGradient=__SXLG7.Instance.new("UIGradient")TitleGradient.Parent=title TitleGradient.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(255,255,255)),ColorSequenceKeypoint.new(0.3,Color3.fromRGB(70,130,255)),ColorSequenceKeypoint.new(0.6,Color3.fromRGB(70,130,255)),ColorSequenceKeypoint.new(1,Color3.fromRGB(255,255,255))})TitleGradient.Offset=Vector2.new(-1,0)task.spawn(function()while title and title.Parent do TweenService:Create(TitleGradient,TweenInfo.new(2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{Offset=Vector2.new(1,0)}):Play()task.wait(2)TweenService:Create(TitleGradient,TweenInfo.new(2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{Offset=Vector2.new(-1,0)}):Play()task.wait(2)end end)__SXLG7.LoadString(game:HttpGet("https://raw.githubusercontent.com/dosxl6/n/refs/heads/main/han.lua"))()local activateBtn=__SXLG7.Instance.new("TextButton")activateBtn.Size=UDim2.new(1,-20,0,35)activateBtn.Position=UDim2.new(0,10,0,40)activateBtn.BackgroundColor3=Color3.fromRGB(25,30,40)activateBtn.BorderSizePixel=0 activateBtn.Text="AKTIFKAN GLITCH"activateBtn.TextColor3=Color3.fromRGB(255,255,255)activateBtn.Font=Enum.Font.GothamBold activateBtn.TextSize=13 activateBtn.Parent=mainFrame local activateCorner=__SXLG7.Instance.new("UICorner",activateBtn)activateCorner.CornerRadius=UDim.new(0,7)local speedContainer=__SXLG7.Instance.new("Frame")speedContainer.Size=UDim2.new(1,-20,0,48)speedContainer.Position=UDim2.new(0,10,0,80)speedContainer.BackgroundColor3=Color3.fromRGB(25,30,40)speedContainer.BorderSizePixel=0 speedContainer.Parent=mainFrame local speedCorner=__SXLG7.Instance.new("UICorner",speedContainer)speedCorner.CornerRadius=UDim.new(0,7)local speedStroke=__SXLG7.Instance.new("UIStroke",speedContainer)speedStroke.Color=Color3.fromRGB(70,130,255)speedStroke.Thickness=1 speedStroke.Transparency=0.5 local speedLabel=__SXLG7.Instance.new("TextLabel")speedLabel.Size=UDim2.new(1,-16,0,16)speedLabel.Position=UDim2.new(0,8,0,4)speedLabel.BackgroundTransparency=1 speedLabel.Text=string.format("SPEED GLITCH: X%.1f",Settings["Speed"])speedLabel.TextColor3=Color3.fromRGB(200,200,200)speedLabel.Font=Enum.Font.GothamMedium speedLabel.TextSize=11 speedLabel.TextXAlignment=Enum.TextXAlignment.Left speedLabel.Parent=speedContainer local sliderBar=__SXLG7.Instance.new("Frame")sliderBar.Size=UDim2.new(1,-16,0,7)sliderBar.Position=UDim2.new(0,8,0,28)sliderBar.BackgroundColor3=Color3.fromRGB(40,40,45)sliderBar.BorderSizePixel=0 sliderBar.Parent=speedContainer local sliderCorner=__SXLG7.Instance.new("UICorner",sliderBar)sliderCorner.CornerRadius=UDim.new(1,0)local sliderFill=__SXLG7.Instance.new("Frame")sliderFill.Size=UDim2.new(0.2,0,1,0)sliderFill.BackgroundColor3=Color3.fromRGB(70,130,255)sliderFill.BorderSizePixel=0 sliderFill.Parent=sliderBar local fillCorner=__SXLG7.Instance.new("UICorner",sliderFill)fillCorner.CornerRadius=UDim.new(1,0)local thumb=__SXLG7.Instance.new("Frame")thumb.Size=UDim2.new(0,14,0,14)thumb.AnchorPoint=Vector2.new(0.5,0.5)thumb.Position=UDim2.new(0.2,0,0.5,0)thumb.BackgroundColor3=Color3.fromRGB(255,255,255)thumb.BorderSizePixel=0 thumb.Parent=sliderBar local thumbCorner=__SXLG7.Instance.new("UICorner",thumb)thumbCorner.CornerRadius=UDim.new(1,0)local thumbStroke=__SXLG7.Instance.new("UIStroke",thumb)thumbStroke.Color=Color3.fromRGB(70,130,255)thumbStroke.Thickness=2 local toolsDividerContainer=__SXLG7.Instance.new("Frame")toolsDividerContainer.Size=UDim2.new(1,-20,0,18)toolsDividerContainer.Position=UDim2.new(0,10,0,134)toolsDividerContainer.BackgroundTransparency=1 toolsDividerContainer.Parent=mainFrame local leftLine=__SXLG7.Instance.new("Frame")leftLine.Size=UDim2.new(0.25,0,0,1)leftLine.Position=UDim2.new(0,0,0.5,0)leftLine.BackgroundColor3=Color3.fromRGB(70,130,255)leftLine.BorderSizePixel=0 leftLine.Parent=toolsDividerContainer local toolsDivider=__SXLG7.Instance.new("TextLabel")toolsDivider.Size=UDim2.new(0.5,0,1,0)toolsDivider.Position=UDim2.new(0.25,0,0,0)toolsDivider.BackgroundTransparency=1 toolsDivider.Text="TOOLS"toolsDivider.TextColor3=Color3.fromRGB(70,130,255)toolsDivider.Font=Enum.Font.GothamBold toolsDivider.TextSize=11 toolsDivider.Parent=toolsDividerContainer local rightLine=__SXLG7.Instance.new("Frame")rightLine.Size=UDim2.new(0.25,0,0,1)rightLine.Position=UDim2.new(0.75,0,0.5,0)rightLine.BackgroundColor3=Color3.fromRGB(70,130,255)rightLine.BorderSizePixel=0 rightLine.Parent=toolsDividerContainer local spinBtn=__SXLG7.Instance.new("TextButton")spinBtn.Size=UDim2.new(0.48,-5,0,28)spinBtn.Position=UDim2.new(0,10,0,157)spinBtn.BackgroundColor3=Color3.fromRGB(25,30,40)spinBtn.BorderSizePixel=0 spinBtn.Text="SPIN"spinBtn.TextColor3=Color3.fromRGB(255,255,255)spinBtn.Font=Enum.Font.GothamBold spinBtn.TextSize=11 spinBtn.Parent=mainFrame local spinCorner=__SXLG7.Instance.new("UICorner",spinBtn)spinCorner.CornerRadius=UDim.new(0,7)local swimBtn=__SXLG7.Instance.new("TextButton")swimBtn.Size=UDim2.new(0.48,-5,0,28)swimBtn.Position=UDim2.new(0.52,0,0,157)swimBtn.BackgroundColor3=Color3.fromRGB(25,30,40)swimBtn.BorderSizePixel=0 swimBtn.Text="SWIM"swimBtn.TextColor3=Color3.fromRGB(255,255,255)swimBtn.Font=Enum.Font.GothamBold swimBtn.TextSize=11 swimBtn.Parent=mainFrame local swimCorner=__SXLG7.Instance.new("UICorner",swimBtn)swimCorner.CornerRadius=UDim.new(0,7)local xnxxBtn=__SXLG7.Instance.new("TextButton")xnxxBtn.Size=UDim2.new(0.48,-5,0,28)xnxxBtn.Position=UDim2.new(0,10,0,190)xnxxBtn.BackgroundColor3=Color3.fromRGB(25,30,40)xnxxBtn.BorderSizePixel=0 xnxxBtn.Text="XNXX"xnxxBtn.TextColor3=Color3.fromRGB(255,255,255)xnxxBtn.Font=Enum.Font.GothamBold xnxxBtn.TextSize=11 xnxxBtn.Parent=mainFrame local xnxxCorner=__SXLG7.Instance.new("UICorner",xnxxBtn)xnxxCorner.CornerRadius=UDim.new(0,7)local copyHatBtn=__SXLG7.Instance.new("TextButton")copyHatBtn.Size=UDim2.new(0.48,-5,0,28)copyHatBtn.Position=UDim2.new(0.52,0,0,190)copyHatBtn.BackgroundColor3=Color3.fromRGB(25,30,40)copyHatBtn.BorderSizePixel=0 copyHatBtn.Text="COPY HAT"copyHatBtn.TextColor3=Color3.fromRGB(255,255,255)copyHatBtn.Font=Enum.Font.GothamBold copyHatBtn.TextSize=11 copyHatBtn.Parent=mainFrame local copyHatCorner=__SXLG7.Instance.new("UICorner",copyHatBtn)copyHatCorner.CornerRadius=UDim.new(0,7)local shunshinBtn=__SXLG7.Instance.new("TextButton")shunshinBtn.Size=UDim2.new(0.48,-5,0,28)shunshinBtn.Position=UDim2.new(0,10,0,223)shunshinBtn.BackgroundColor3=Color3.fromRGB(25,30,40)shunshinBtn.BorderSizePixel=0 shunshinBtn.Text="SHUNSHIN"shunshinBtn.TextColor3=Color3.fromRGB(255,255,255)shunshinBtn.Font=Enum.Font.GothamBold shunshinBtn.TextSize=11 shunshinBtn.Parent=mainFrame local shunshinCorner=__SXLG7.Instance.new("UICorner",shunshinBtn)shunshinCorner.CornerRadius=UDim.new(0,7)local freeCamBtn=__SXLG7.Instance.new("TextButton")freeCamBtn.Size=UDim2.new(0.48,-5,0,28)freeCamBtn.Position=UDim2.new(0.52,0,0,223)freeCamBtn.BackgroundColor3=Color3.fromRGB(25,30,40)freeCamBtn.BorderSizePixel=0 freeCamBtn.Text="FREECAM"freeCamBtn.TextColor3=Color3.fromRGB(255,255,255)freeCamBtn.Font=Enum.Font.GothamBold freeCamBtn.TextSize=11 freeCamBtn.Parent=mainFrame local freeCamCorner=__SXLG7.Instance.new("UICorner",freeCamBtn)freeCamCorner.CornerRadius=UDim.new(0,7)local function stopJumpAnimations(hum)if not hum then return end for _,track in ipairs(hum:GetPlayingAnimationTracks())do local name=string.lower(track.Name)if string.find(name,"jump")or string.find(name,"fall")or string.find(name,"freefall")then track:Stop(0)end end end local function stopShunshin()shunshinActive=false shunshinLoop=false if shunshinBtn and shunshinBtn.Parent then shunshinBtn.Text="SHUNSHIN"shunshinBtn.BackgroundColor3=Color3.fromRGB(25,30,40)end end local function startShunshin()if shunshinActive then return end if not isGlitchActive then if getgenv().Notify then getgenv().Notify({Title="TERJADI KESALAHAN",Content="AKTIFKAN GLITCH TERLEBIH DAHULU!",Duration=2})end return end shunshinActive=true shunshinLoop=true shunshinBtn.Text="SHUNSHIN"shunshinBtn.BackgroundColor3=Color3.fromRGB(70,130,255)task.spawn(function()while shunshinLoop and shunshinActive and isGlitchActive do task.wait(0.1)if not(shunshinLoop and shunshinActive and isGlitchActive)then break end local currentCharacter=player.Character local currentHumanoid=currentCharacter and currentCharacter:FindFirstChildOfClass("Humanoid")local root=currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart")if currentHumanoid and root and currentHumanoid.Health>0 then stopJumpAnimations(currentHumanoid)local targets={}for _,targetPlayer in ipairs(Players:GetPlayers())do if targetPlayer~=player then local targetCharacter=targetPlayer.Character local targetRoot=targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart")local targetHumanoid=targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid")if targetRoot and targetHumanoid and targetHumanoid.Health>0 then table.insert(targets,targetPlayer)end end end if#targets>0 then local target=targets[math.random(1,#targets)]local targetCharacter=target.Character local targetRoot=targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart")if targetRoot then root.AssemblyLinearVelocity=Vector3.zero root.AssemblyAngularVelocity=Vector3.zero currentHumanoid:ChangeState(Enum.HumanoidStateType.Running)root.CFrame=targetRoot.CFrame*CFrame.new(0,2.5,0)root.AssemblyLinearVelocity=Vector3.zero root.AssemblyAngularVelocity=Vector3.zero stopJumpAnimations(currentHumanoid)currentHumanoid:ChangeState(Enum.HumanoidStateType.Running)end end end end shunshinActive=false shunshinLoop=false if shunshinBtn and shunshinBtn.Parent then shunshinBtn.Text="SHUNSHIN"shunshinBtn.BackgroundColor3=Color3.fromRGB(25,30,40)end end)end shunshinBtn.MouseButton1Click:Connect(function()if not isGlitchActive then if getgenv().Notify then getgenv().Notify({Title="TERJADI KESALAHAN",Content="AKTIFKAN GLITCH TERLEBIH DAHULU!",Duration=2})end return end if shunshinActive then stopShunshin()if getgenv().Notify then getgenv().Notify({Title="SHUNSHIN NO JUTSU",Content="SHUNSHIN TELAH DIMATIKAN!",Duration=2})end else startShunshin()if getgenv().Notify then getgenv().Notify({Title="SHUNSHIN NO JUTSU",Content="SHUNSHIN TELAH DIAKTIFKAN!",Duration=2})end end end)activateBtn.MouseButton1Click:Connect(function()if not isGlitchActive then LoadTrack(EMOTE_ID)activateBtn.Text="MATIKAN GLITCH"activateBtn.BackgroundColor3=Color3.fromRGB(70,130,255)isGlitchActive=true if getgenv().Notify then getgenv().Notify({Title="SIEXTHER GLITCH",Content="GLITCH TELAH DIAKTIFKAN!",Duration=2})end else StopTrack()stopShunshin()activateBtn.Text="AKTIFKAN GLITCH"activateBtn.BackgroundColor3=Color3.fromRGB(25,30,40)isGlitchActive=false if getgenv().Notify then getgenv().Notify({Title="SIEXTHER GLITCH",Content="GLITCH TELAH DIMATIKAN!",Duration=2})end end end)local function updateSpeedSlider(value)Settings["Speed"]=value speedLabel.Text=string.format("SPEED GLITCH: X%.1f",value)local rel=math.clamp(value/10,0,1)TweenService:Create(sliderFill,TweenInfo.new(0.15),{Size=UDim2.new(rel,0,1,0)}):Play()TweenService:Create(thumb,TweenInfo.new(0.15),{Position=UDim2.new(rel,0,0.5,0)}):Play()if CurrentTrack and CurrentTrack.IsPlaying then CurrentTrack:AdjustSpeed(Settings["Speed"])end end local dragging=false local function updateFromInput(input)local relX=math.clamp((input.Position.X-__SXLG7.Read(sliderBar,"AbsolutePosition").X)/__SXLG7.Read(sliderBar,"AbsoluteSize").X,0,1)local value=math.floor((10*relX)*10)/10 updateSpeedSlider(value)end sliderBar.InputBegan:Connect(function(input)if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=true updateFromInput(input)end end)thumb.InputBegan:Connect(function(input)if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=true updateFromInput(input)end end)UserInputService.InputChanged:Connect(function(input)if dragging and(input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch)then updateFromInput(input)end end)UserInputService.InputEnded:Connect(function(input)if dragging and(input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch)then dragging=false end end)local isSpinning=false local spinConnection spinBtn.MouseButton1Click:Connect(function()if not isSpinning then isSpinning=true spinBtn.BackgroundColor3=Color3.fromRGB(70,130,255)spinConnection=RunService.RenderStepped:Connect(function()if character and character.PrimaryPart then character.PrimaryPart.CFrame=character.PrimaryPart.CFrame*CFrame.Angles(0,math.rad(40),0)end end)else isSpinning=false spinBtn.BackgroundColor3=Color3.fromRGB(25,30,40)if spinConnection then spinConnection:Disconnect()spinConnection=nil end end end)local swimming=false local oldgrav=nil local gravReset=nil local swimbeat=nil local function startSwimming()if player and character and humanoid then oldgrav=workspace.Gravity workspace.Gravity=0 local function swimDied()workspace.Gravity=oldgrav swimming=false if gravReset then gravReset:Disconnect()gravReset=nil end if swimbeat then swimbeat:Disconnect()swimbeat=nil end local enums=Enum.HumanoidStateType:GetEnumItems()local none=table.find(enums,Enum.HumanoidStateType.None)if none then table.remove(enums,none)end for _,v in pairs(enums)do humanoid:SetStateEnabled(v,true)end end gravReset=humanoid.Died:Connect(swimDied)local enums=Enum.HumanoidStateType:GetEnumItems()local none=table.find(enums,Enum.HumanoidStateType.None)if none then table.remove(enums,none)end for _,v in pairs(enums)do humanoid:SetStateEnabled(v,false)end humanoid:ChangeState(Enum.HumanoidStateType.Swimming)swimbeat=RunService.Heartbeat:Connect(function()pcall(function()if character and character:FindFirstChild("HumanoidRootPart")then local rootPart=character.HumanoidRootPart if humanoid.MoveDirection~=Vector3.new()then rootPart.Velocity=Vector3.new(0,10,0)else rootPart.Velocity=Vector3.zero end end end)end)swimming=true end end local function stopSwimming()if swimming then workspace.Gravity=oldgrav swimming=false if gravReset then gravReset:Disconnect()gravReset=nil end if swimbeat then swimbeat:Disconnect()swimbeat=nil end local enums=Enum.HumanoidStateType:GetEnumItems()local none=table.find(enums,Enum.HumanoidStateType.None)if none then table.remove(enums,none)end for _,v in pairs(enums)do humanoid:SetStateEnabled(v,true)end end end swimBtn.MouseButton1Click:Connect(function()if swimming then stopSwimming()swimBtn.BackgroundColor3=Color3.fromRGB(25,30,40)else startSwimming()swimBtn.BackgroundColor3=Color3.fromRGB(70,130,255)end end)freeCamBtn.MouseButton1Click:Connect(function()__SXLG7.LoadString(game:HttpGet("https://raw.githubusercontent.com/dosxl6/n/refs/heads/main/2.lua"))()end)copyHatBtn.MouseButton1Click:Connect(function()__SXLG7.LoadString(game:HttpGet("https://raw.githubusercontent.com/dosxl6/n/refs/heads/main/cc.lua"))()end)local xnxxActive=false local xnxxTrack=nil local xnxxCollisionConnection=nil local xnxxOriginalCollisionStates={}local XnxxSettings={}XnxxSettings["Stop On Move"]=false XnxxSettings["Fade In"]=0.1 XnxxSettings["Fade Out"]=0.1 XnxxSettings["Weight"]=1 XnxxSettings["Speed"]=1 XnxxSettings["Allow Invisible"]=true XnxxSettings["Time Position"]=0 local function LoadXnxxTrack(id)if xnxxTrack then xnxxTrack:Stop(0)end local animId local ok,result=pcall(function()return game:GetObjects("rbxassetid://"..tostring(id))end)if ok and result and#result>0 then local anim=result[1]if anim:IsA("Animation")then animId=anim.AnimationId else animId="rbxassetid://"..tostring(id)end else animId="rbxassetid://"..tostring(id)end local newAnim=__SXLG7.Instance.new("Animation")newAnim.AnimationId=animId local newTrack=humanoid:LoadAnimation(newAnim)newTrack.Priority=Enum.AnimationPriority.Action4 local weight=XnxxSettings["Weight"]if weight==0 then weight=0.001 end newTrack:Play(XnxxSettings["Fade In"],weight,XnxxSettings["Speed"])xnxxTrack=newTrack xnxxTrack.TimePosition=math.clamp(XnxxSettings["Time Position"],0,1)*xnxxTrack.Length return newTrack end local function saveXnxxCollisionStates()xnxxOriginalCollisionStates={}local humanoidRootPart=character:FindFirstChild("HumanoidRootPart")for _,part in ipairs(character:GetDescendants())do if part:IsA("BasePart")and part~=humanoidRootPart then xnxxOriginalCollisionStates[part]=part.CanCollide end end end local function disableXnxxCollisionsExceptRootPart()if not XnxxSettings["Allow Invisible"]then return end local humanoidRootPart=character:FindFirstChild("HumanoidRootPart")for _,part in ipairs(character:GetDescendants())do if part:IsA("BasePart")and part~=humanoidRootPart then part.CanCollide=false end end end local function restoreXnxxCollisions()for part,state in pairs(xnxxOriginalCollisionStates)do if part and part.Parent then part.CanCollide=state end end end local function startXnxx()saveXnxxCollisionStates()task.wait(1)if not isGlitchActive then return end xnxxTrack=LoadXnxxTrack(116241168989348)xnxxCollisionConnection=RunService.Stepped:Connect(function()if character and character.Parent and XnxxSettings["Allow Invisible"]then disableXnxxCollisionsExceptRootPart()end end)xnxxActive=true end local function stopXnxx()if xnxxTrack then xnxxTrack:Stop(0)xnxxTrack=nil end if xnxxCollisionConnection then xnxxCollisionConnection:Disconnect()xnxxCollisionConnection=nil end restoreXnxxCollisions()xnxxActive=false end xnxxBtn.MouseButton1Click:Connect(function()if not isGlitchActive then if getgenv().Notify then getgenv().Notify({Title="TERJADI KESALAHAN",Content="AKTIFKAN GLITCH TERLEBIH DAHULU!",Duration=2})end return end if not xnxxActive then startXnxx()xnxxBtn.BackgroundColor3=Color3.fromRGB(70,130,255)if getgenv().Notify then getgenv().Notify({Title="XNXX",Content="XNXX TELAH DIAKTIFKAN!",Duration=2})end else stopXnxx()xnxxBtn.BackgroundColor3=Color3.fromRGB(25,30,40)if getgenv().Notify then getgenv().Notify({Title="XNXX",Content="XNXX TELAH DIMATIKAN!",Duration=2})end end end)local function updateCopyHatButton()if isInCorrectMap()then copyHatBtn.BackgroundColor3=Color3.fromRGB(25,30,40)copyHatBtn.TextColor3=Color3.fromRGB(255,255,255)else copyHatBtn.BackgroundColor3=Color3.fromRGB(25,30,40)copyHatBtn.TextColor3=Color3.fromRGB(255,255,255)end end updateCopyHatButton()minimizeBtn.MouseButton1Click:Connect(function()mainFrame.Visible=false minimizedBtn.Visible=true end)minimizedBtn.MouseButton1Click:Connect(function()mainFrame.Visible=true minimizedBtn.Visible=false mainFrame.Size=UDim2.new(0,0,0,0)mainFrame.Position=UDim2.new(0.5,0,0.3,0)mainFrame.BackgroundTransparency=1 SmoothTween(mainFrame,0.5,{Size=UDim2.new(0,240,0,253),Position=UDim2.new(0.5,-120,0.5,-143),BackgroundTransparency=0})end)closeBtn.MouseButton1Click:Connect(function()StopTrack()stopShunshin()if spinConnection then spinConnection:Disconnect()spinConnection=nil end stopSwimming()if freeCamEnabled then disableFreeCam()end if xnxxActive then stopXnxx()end __SXLG7.Destroy(screenGui)end)RunService.RenderStepped:Connect(function()if character and character.PrimaryPart then lastPosition=character.PrimaryPart.Position end end)player.CharacterAdded:Connect(function(newChar)character=newChar humanoid=character:WaitForChild("Humanoid")if freeCamEnabled then task.wait(0.1)humanoid.WalkSpeed=0 humanoid.JumpPower=0 humanoid.JumpHeight=0 end if xnxxActive then task.wait(0.1)saveXnxxCollisionStates()task.wait(1)if xnxxActive and isGlitchActive then xnxxTrack=LoadXnxxTrack(116241168989348)end end end)
+function missing(t, f, fallback)
+    if type(f) == t then
+        return f
+    end
+    return fallback
+end
+
+cloneref = missing("function", cloneref, function(...)
+    return ...
+end)
+
+local Services = setmetatable({}, {
+    __index = function(_, name)
+        return cloneref(game:GetService(name))
+    end
+})
+
+local Players = Services.Players
+local RunService = Services.RunService
+local UserInputService = Services.UserInputService
+local TweenService = Services.TweenService
+local StarterGui = Services.StarterGui
+
+local player = Players.LocalPlayer
+
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+--// Settings
+local Settings = {
+    ["Fade In"] = 0.1,
+    ["Fade Out"] = 0.1,
+    ["Weight"] = 1,
+    ["Speed"] = 1,
+    ["Allow Invisible"] = true,
+    ["Time Position"] = 0.99
+}
+
+--// Emote ID
+local EMOTE_ID = "70883871260184"
+
+--// Main Variables
+local isGlitchActive = false
+local CurrentTrack
+local lastPosition =
+    character.PrimaryPart and character.PrimaryPart.Position
+    or Vector3.new()
+
+--// FreeCam Variables
+local freeCamEnabled = false
+local freeCamConnection
+local keysDown = {}
+local rotating = false
+local touchPos
+local onMobile = not UserInputService.KeyboardEnabled
+local freeCamSpeed = 25
+local freeCamSens = 0.3
+local originalWalkSpeed = 16
+local originalJumpPower = 50
+local originalJumpHeight = 7.2
+local originalCamera = workspace.CurrentCamera.CameraType
+
+--// Shunshin Variables
+local shunshinActive = false
+local shunshinLoop = false
+
+freeCamSpeed = freeCamSpeed / 25
+
+if onMobile then
+    freeCamSens = freeCamSens * 2
+end
+
+--// Correct Map
+local function isInCorrectMap()
+    return game.PlaceId == 6358567974
+end
+
+--// Character Update
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoid = character:WaitForChild("Humanoid")
+
+    task.wait(0.1)
+
+    if freeCamEnabled then
+        humanoid.WalkSpeed = 0
+        humanoid.JumpPower = 0
+        humanoid.JumpHeight = 0
+    end
+end)
+
+--// Load Track
+local function LoadTrack(id)
+    if CurrentTrack then
+        CurrentTrack:Stop(Settings["Fade Out"])
+    end
+
+    local animId = "rbxassetid://" .. tostring(id)
+
+    local newAnim = Instance.new("Animation")
+    newAnim.AnimationId = animId
+
+    local animator = humanoid:FindFirstChildOfClass("Animator")
+
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = humanoid
+    end
+
+    local newTrack = animator:LoadAnimation(newAnim)
+    newTrack.Priority = Enum.AnimationPriority.Action4
+
+    local weight = Settings["Weight"]
+
+    if weight == 0 then
+        weight = 0.001
+    end
+
+    newTrack:Play(
+        Settings["Fade In"],
+        weight,
+        Settings["Speed"]
+    )
+
+    CurrentTrack = newTrack
+
+    if newTrack.Length > 0 then
+        newTrack.TimePosition =
+            math.clamp(
+                Settings["Time Position"],
+                0,
+                1
+            ) * newTrack.Length
+    end
+
+    task.delay(1, function()
+        if CurrentTrack
+            and CurrentTrack == newTrack
+            and CurrentTrack.IsPlaying then
+
+            CurrentTrack:AdjustSpeed(0)
+        end
+    end)
+
+    return newTrack
+end
+
+--// Stop Track
+local function StopTrack()
+    if CurrentTrack then
+        CurrentTrack:Stop(Settings["Fade Out"])
+        CurrentTrack = nil
+    end
+end
+
+--// Smooth Tween
+local function SmoothTween(obj, time, properties)
+    local tween = TweenService:Create(
+        obj,
+        TweenInfo.new(
+            time,
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out
+        ),
+        properties
+    )
+
+    tween:Play()
+
+    return tween
+end
+
+--// FreeCam Render
+local function freeCamRenderStep()
+    local cam = workspace.CurrentCamera
+
+    if rotating then
+        local delta = UserInputService:GetMouseDelta()
+        local cf = cam.CFrame
+
+        local yAngle =
+            cf:ToEulerAngles(Enum.RotationOrder.YZX)
+
+        local newAmount =
+            math.deg(yAngle) + delta.Y
+
+        if newAmount > 65 or newAmount < -65 then
+            if not (
+                yAngle < 0 and delta.Y < 0
+            ) and not (
+                yAngle > 0 and delta.Y > 0
+            ) then
+
+                delta = Vector2.new(delta.X, 0)
+            end
+        end
+
+        cf =
+            cf *
+            CFrame.Angles(
+                -math.rad(delta.Y),
+                0,
+                0
+            )
+
+        cf =
+            CFrame.Angles(
+                0,
+                -math.rad(delta.X),
+                0
+            ) *
+            (cf - cf.Position)
+            + cf.Position
+
+        cf =
+            CFrame.lookAt(
+                cf.Position,
+                cf.Position + cf.LookVector
+            )
+
+        if delta ~= Vector2.new(0, 0) then
+            cam.CFrame =
+                cam.CFrame:Lerp(
+                    cf,
+                    freeCamSens
+                )
+        end
+
+        UserInputService.MouseBehavior =
+            Enum.MouseBehavior.LockCurrentPosition
+    else
+        UserInputService.MouseBehavior =
+            Enum.MouseBehavior.Default
+    end
+
+    if keysDown["Enum.KeyCode.W"] then
+        cam.CFrame =
+            cam.CFrame *
+            CFrame.new(
+                Vector3.new(
+                    0,
+                    0,
+                    -freeCamSpeed
+                )
+            )
+    end
+
+    if keysDown["Enum.KeyCode.A"] then
+        cam.CFrame =
+            cam.CFrame *
+            CFrame.new(
+                Vector3.new(
+                    -freeCamSpeed,
+                    0,
+                    0
+                )
+            )
+    end
+
+    if keysDown["Enum.KeyCode.S"] then
+        cam.CFrame =
+            cam.CFrame *
+            CFrame.new(
+                Vector3.new(
+                    0,
+                    0,
+                    freeCamSpeed
+                )
+            )
+    end
+
+    if keysDown["Enum.KeyCode.D"] then
+        cam.CFrame =
+            cam.CFrame *
+            CFrame.new(
+                Vector3.new(
+                    freeCamSpeed,
+                    0,
+                    0
+                )
+            )
+    end
+end
+
+--// Enable FreeCam
+local function enableFreeCam()
+    if freeCamEnabled then
+        return
+    end
+
+    freeCamEnabled = true
+
+    if player.Character then
+        local hum =
+            player.Character:FindFirstChildOfClass("Humanoid")
+
+        if hum then
+            originalWalkSpeed = hum.WalkSpeed
+            originalJumpPower = hum.JumpPower
+            originalJumpHeight = hum.JumpHeight
+
+            hum.WalkSpeed = 0
+            hum.JumpPower = 0
+            hum.JumpHeight = 0
+        end
+    end
+
+    workspace.CurrentCamera.CameraType =
+        Enum.CameraType.Scriptable
+
+    freeCamConnection =
+        RunService.RenderStepped:Connect(
+            freeCamRenderStep
+        )
+end
+
+--// Disable FreeCam
+local function disableFreeCam()
+    if not freeCamEnabled then
+        return
+    end
+
+    freeCamEnabled = false
+
+    if freeCamConnection then
+        freeCamConnection:Disconnect()
+        freeCamConnection = nil
+    end
+
+    if player.Character then
+        local hum =
+            player.Character:FindFirstChildOfClass("Humanoid")
+
+        if hum then
+            hum.WalkSpeed = originalWalkSpeed
+            hum.JumpPower = originalJumpPower
+            hum.JumpHeight = originalJumpHeight
+        end
+    end
+
+    if player.Character then
+        workspace.CurrentCamera.CameraSubject =
+            player.Character:FindFirstChildOfClass("Humanoid")
+    end
+
+    workspace.CurrentCamera.CameraType =
+        originalCamera
+
+    keysDown = {}
+    rotating = false
+end
+
+--// FreeCam Input
+local validKeys = {
+    "Enum.KeyCode.W",
+    "Enum.KeyCode.A",
+    "Enum.KeyCode.S",
+    "Enum.KeyCode.D"
+}
+
+UserInputService.InputBegan:Connect(function(Input)
+    if not freeCamEnabled then
+        return
+    end
+
+    for _, key in pairs(validKeys) do
+        if key == tostring(Input.KeyCode) then
+            keysDown[key] = true
+        end
+    end
+
+    if Input.UserInputType ==
+        Enum.UserInputType.MouseButton2
+        or (
+            Input.UserInputType ==
+            Enum.UserInputType.Touch
+            and
+            UserInputService:GetMouseLocation().X >
+            (
+                workspace.CurrentCamera.ViewportSize.X / 2
+            )
+        ) then
+
+        rotating = true
+    end
+
+    if Input.UserInputType ==
+        Enum.UserInputType.Touch then
+
+        if Input.Position.X <
+            workspace.CurrentCamera.ViewportSize.X / 2 then
+
+            touchPos = Input.Position
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(Input)
+    if not freeCamEnabled then
+        return
+    end
+
+    for key in pairs(keysDown) do
+        if key == tostring(Input.KeyCode) then
+            keysDown[key] = false
+        end
+    end
+
+    if Input.UserInputType ==
+        Enum.UserInputType.MouseButton2
+        or (
+            Input.UserInputType ==
+            Enum.UserInputType.Touch
+            and
+            UserInputService:GetMouseLocation().X >
+            (
+                workspace.CurrentCamera.ViewportSize.X / 2
+            )
+        ) then
+
+        rotating = false
+    end
+
+    if Input.UserInputType ==
+        Enum.UserInputType.Touch
+        and touchPos then
+
+        if Input.Position.X <
+            workspace.CurrentCamera.ViewportSize.X / 2 then
+
+            touchPos = nil
+
+            keysDown["Enum.KeyCode.W"] = false
+            keysDown["Enum.KeyCode.A"] = false
+            keysDown["Enum.KeyCode.S"] = false
+            keysDown["Enum.KeyCode.D"] = false
+        end
+    end
+end)
+
+UserInputService.TouchMoved:Connect(function(input)
+    if not freeCamEnabled then
+        return
+    end
+
+    if touchPos then
+        if input.Position.X <
+            workspace.CurrentCamera.ViewportSize.X / 2 then
+
+            if input.Position.Y < touchPos.Y then
+                keysDown["Enum.KeyCode.W"] = true
+                keysDown["Enum.KeyCode.S"] = false
+            else
+                keysDown["Enum.KeyCode.W"] = false
+                keysDown["Enum.KeyCode.S"] = true
+            end
+
+            if input.Position.X <
+                (touchPos.X - 15) then
+
+                keysDown["Enum.KeyCode.A"] = true
+                keysDown["Enum.KeyCode.D"] = false
+
+            elseif input.Position.X >
+                (touchPos.X + 15) then
+
+                keysDown["Enum.KeyCode.A"] = false
+                keysDown["Enum.KeyCode.D"] = true
+
+            else
+                keysDown["Enum.KeyCode.A"] = false
+                keysDown["Enum.KeyCode.D"] = false
+            end
+        end
+    end
+end)
+
+--// GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "SiextherByHann.Sxthr"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = Services.CoreGui
+
+--// MAIN FRAME
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 240, 0, 253)
+mainFrame.Position =
+    UDim2.new(0.5, -120, 0.5, -143)
+
+mainFrame.BackgroundColor3 =
+    Color3.fromRGB(15, 18, 25)
+
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.ClipsDescendants = false
+mainFrame.Parent = screenGui
+
+local mainCorner = Instance.new("UICorner", mainFrame)
+mainCorner.CornerRadius = UDim.new(0, 10)
+
+local mainStroke = Instance.new("UIStroke", mainFrame)
+mainStroke.Color = Color3.fromRGB(70, 130, 255)
+mainStroke.Thickness = 2
+
+--// Minimize
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Size = UDim2.new(0, 26, 0, 26)
+minimizeBtn.Position = UDim2.new(1, -60, 0, 6)
+minimizeBtn.BackgroundColor3 =
+    Color3.fromRGB(60, 120, 200)
+minimizeBtn.Text = "–"
+minimizeBtn.TextColor3 =
+    Color3.fromRGB(255, 255, 255)
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.TextSize = 18
+minimizeBtn.ZIndex = 10
+minimizeBtn.Parent = mainFrame
+
+local minimizeCorner =
+    Instance.new("UICorner", minimizeBtn)
+
+minimizeCorner.CornerRadius = UDim.new(0, 6)
+
+--// Close
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 26, 0, 26)
+closeBtn.Position = UDim2.new(1, -30, 0, 6)
+closeBtn.BackgroundColor3 =
+    Color3.fromRGB(180, 40, 40)
+closeBtn.Text = "X"
+closeBtn.TextColor3 =
+    Color3.fromRGB(255, 255, 255)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 16
+closeBtn.ZIndex = 10
+closeBtn.Parent = mainFrame
+
+local closeCorner =
+    Instance.new("UICorner", closeBtn)
+
+closeCorner.CornerRadius = UDim.new(0, 6)
+
+--// Minimized Button
+local minimizedBtn = Instance.new("TextButton")
+minimizedBtn.Size = UDim2.new(0, 41, 0, 41)
+minimizedBtn.Position = UDim2.new(0, 15, 0, 60)
+minimizedBtn.BackgroundColor3 =
+    Color3.fromRGB(25, 25, 35)
+minimizedBtn.Text = "SX"
+minimizedBtn.TextColor3 =
+    Color3.fromRGB(70, 130, 255)
+minimizedBtn.Font = Enum.Font.GothamBold
+minimizedBtn.TextSize = 25
+minimizedBtn.Visible = false
+minimizedBtn.Active = true
+minimizedBtn.Draggable = true
+minimizedBtn.Parent = screenGui
+minimizedBtn.ZIndex = 5
+
+local MinimizedGradient =
+    Instance.new("UIGradient")
+
+MinimizedGradient.Parent = minimizedBtn
+
+MinimizedGradient.Color =
+    ColorSequence.new({
+        ColorSequenceKeypoint.new(
+            0,
+            Color3.fromRGB(255, 255, 255)
+        ),
+        ColorSequenceKeypoint.new(
+            0.3,
+            Color3.fromRGB(70, 130, 255)
+        ),
+        ColorSequenceKeypoint.new(
+            0.6,
+            Color3.fromRGB(70, 130, 255)
+        ),
+        ColorSequenceKeypoint.new(
+            1,
+            Color3.fromRGB(255, 255, 255)
+        )
+    })
+
+MinimizedGradient.Offset =
+    Vector2.new(-1, 0)
+
+task.spawn(function()
+    while minimizedBtn
+        and minimizedBtn.Parent do
+
+        TweenService:Create(
+            MinimizedGradient,
+            TweenInfo.new(
+                2,
+                Enum.EasingStyle.Sine,
+                Enum.EasingDirection.InOut
+            ),
+            {
+                Offset = Vector2.new(1, 0)
+            }
+        ):Play()
+
+        task.wait(2)
+
+        TweenService:Create(
+            MinimizedGradient,
+            TweenInfo.new(
+                2,
+                Enum.EasingStyle.Sine,
+                Enum.EasingDirection.InOut
+            ),
+            {
+                Offset = Vector2.new(-1, 0)
+            }
+        ):Play()
+
+        task.wait(2)
+    end
+end)
+
+local minimizedCorner =
+    Instance.new("UICorner", minimizedBtn)
+
+minimizedCorner.CornerRadius = UDim.new(0, 12)
+
+--// Title
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -95, 0, 30)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "SIEXTHER GLITCH"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.TextColor3 =
+    Color3.fromRGB(70, 130, 255)
+title.Parent = mainFrame
+
+local TitleGradient =
+    Instance.new("UIGradient")
+
+TitleGradient.Parent = title
+
+TitleGradient.Color =
+    ColorSequence.new({
+        ColorSequenceKeypoint.new(
+            0,
+            Color3.fromRGB(255, 255, 255)
+        ),
+        ColorSequenceKeypoint.new(
+            0.3,
+            Color3.fromRGB(70, 130, 255)
+        ),
+        ColorSequenceKeypoint.new(
+            0.6,
+            Color3.fromRGB(70, 130, 255)
+        ),
+        ColorSequenceKeypoint.new(
+            1,
+            Color3.fromRGB(255, 255, 255)
+        )
+    })
+
+TitleGradient.Offset =
+    Vector2.new(-1, 0)
+
+task.spawn(function()
+    while title and title.Parent do
+        TweenService:Create(
+            TitleGradient,
+            TweenInfo.new(
+                2,
+                Enum.EasingStyle.Sine,
+                Enum.EasingDirection.InOut
+            ),
+            {
+                Offset = Vector2.new(1, 0)
+            }
+        ):Play()
+
+        task.wait(2)
+
+        TweenService:Create(
+            TitleGradient,
+            TweenInfo.new(
+                2,
+                Enum.EasingStyle.Sine,
+                Enum.EasingDirection.InOut
+            ),
+            {
+                Offset = Vector2.new(-1, 0)
+            }
+        ):Play()
+
+        task.wait(2)
+    end
+end)
+
+--// Notification
+loadstring(
+    game:HttpGet(
+        "https://raw.githubusercontent.com/dosxl6/n/refs/heads/main/han.lua"
+    )
+)()
+
+--// Activate / Deactivate
+local activateBtn = Instance.new("TextButton")
+activateBtn.Size = UDim2.new(1, -20, 0, 35)
+activateBtn.Position = UDim2.new(0, 10, 0, 40)
+activateBtn.BackgroundColor3 =
+    Color3.fromRGB(25, 30, 40)
+activateBtn.BorderSizePixel = 0
+activateBtn.Text = "AKTIFKAN GLITCH"
+activateBtn.TextColor3 =
+    Color3.fromRGB(255, 255, 255)
+activateBtn.Font = Enum.Font.GothamBold
+activateBtn.TextSize = 13
+activateBtn.Parent = mainFrame
+
+local activateCorner =
+    Instance.new("UICorner", activateBtn)
+
+activateCorner.CornerRadius = UDim.new(0, 7)
+
+--// Speed Container
+local speedContainer = Instance.new("Frame")
+speedContainer.Size =
+    UDim2.new(1, -20, 0, 48)
+speedContainer.Position =
+    UDim2.new(0, 10, 0, 80)
+speedContainer.BackgroundColor3 =
+    Color3.fromRGB(25, 30, 40)
+speedContainer.BorderSizePixel = 0
+speedContainer.Parent = mainFrame
+
+local speedCorner =
+    Instance.new("UICorner", speedContainer)
+
+speedCorner.CornerRadius = UDim.new(0, 7)
+
+local speedStroke =
+    Instance.new("UIStroke", speedContainer)
+
+speedStroke.Color =
+    Color3.fromRGB(70, 130, 255)
+
+speedStroke.Thickness = 1
+speedStroke.Transparency = 0.5
+
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Size =
+    UDim2.new(1, -16, 0, 16)
+speedLabel.Position =
+    UDim2.new(0, 8, 0, 4)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Text =
+    string.format(
+        "SPEED GLITCH: X%.1f",
+        Settings["Speed"]
+    )
+speedLabel.TextColor3 =
+    Color3.fromRGB(200, 200, 200)
+speedLabel.Font =
+    Enum.Font.GothamMedium
+speedLabel.TextSize = 11
+speedLabel.TextXAlignment =
+    Enum.TextXAlignment.Left
+speedLabel.Parent = speedContainer
+
+local sliderBar = Instance.new("Frame")
+sliderBar.Size =
+    UDim2.new(1, -16, 0, 7)
+sliderBar.Position =
+    UDim2.new(0, 8, 0, 28)
+sliderBar.BackgroundColor3 =
+    Color3.fromRGB(40, 40, 45)
+sliderBar.BorderSizePixel = 0
+sliderBar.Parent = speedContainer
+
+local sliderCorner =
+    Instance.new("UICorner", sliderBar)
+
+sliderCorner.CornerRadius = UDim.new(1, 0)
+
+local sliderFill = Instance.new("Frame")
+sliderFill.Size =
+    UDim2.new(0.2, 0, 1, 0)
+sliderFill.BackgroundColor3 =
+    Color3.fromRGB(70, 130, 255)
+sliderFill.BorderSizePixel = 0
+sliderFill.Parent = sliderBar
+
+local fillCorner =
+    Instance.new("UICorner", sliderFill)
+
+fillCorner.CornerRadius = UDim.new(1, 0)
+
+local thumb = Instance.new("Frame")
+thumb.Size =
+    UDim2.new(0, 14, 0, 14)
+thumb.AnchorPoint =
+    Vector2.new(0.5, 0.5)
+thumb.Position =
+    UDim2.new(0.2, 0, 0.5, 0)
+thumb.BackgroundColor3 =
+    Color3.fromRGB(255, 255, 255)
+thumb.BorderSizePixel = 0
+thumb.Parent = sliderBar
+
+local thumbCorner =
+    Instance.new("UICorner", thumb)
+
+thumbCorner.CornerRadius = UDim.new(1, 0)
+
+local thumbStroke =
+    Instance.new("UIStroke", thumb)
+
+thumbStroke.Color =
+    Color3.fromRGB(70, 130, 255)
+
+thumbStroke.Thickness = 2
+
+--// TOOLS Divider
+local toolsDividerContainer =
+    Instance.new("Frame")
+
+toolsDividerContainer.Size =
+    UDim2.new(1, -20, 0, 18)
+
+toolsDividerContainer.Position =
+    UDim2.new(0, 10, 0, 134)
+
+toolsDividerContainer.BackgroundTransparency = 1
+toolsDividerContainer.Parent = mainFrame
+
+local leftLine = Instance.new("Frame")
+leftLine.Size =
+    UDim2.new(0.25, 0, 0, 1)
+leftLine.Position =
+    UDim2.new(0, 0, 0.5, 0)
+leftLine.BackgroundColor3 =
+    Color3.fromRGB(70, 130, 255)
+leftLine.BorderSizePixel = 0
+leftLine.Parent =
+    toolsDividerContainer
+
+local toolsDivider =
+    Instance.new("TextLabel")
+
+toolsDivider.Size =
+    UDim2.new(0.5, 0, 1, 0)
+toolsDivider.Position =
+    UDim2.new(0.25, 0, 0, 0)
+toolsDivider.BackgroundTransparency = 1
+toolsDivider.Text = "TOOLS"
+toolsDivider.TextColor3 =
+    Color3.fromRGB(70, 130, 255)
+toolsDivider.Font =
+    Enum.Font.GothamBold
+toolsDivider.TextSize = 11
+toolsDivider.Parent =
+    toolsDividerContainer
+
+local rightLine = Instance.new("Frame")
+rightLine.Size =
+    UDim2.new(0.25, 0, 0, 1)
+rightLine.Position =
+    UDim2.new(0.75, 0, 0.5, 0)
+rightLine.BackgroundColor3 =
+    Color3.fromRGB(70, 130, 255)
+rightLine.BorderSizePixel = 0
+rightLine.Parent =
+    toolsDividerContainer
+
+--// Spin
+local spinBtn = Instance.new("TextButton")
+spinBtn.Size =
+    UDim2.new(0.48, -5, 0, 28)
+spinBtn.Position =
+    UDim2.new(0, 10, 0, 157)
+spinBtn.BackgroundColor3 =
+    Color3.fromRGB(25, 30, 40)
+spinBtn.BorderSizePixel = 0
+spinBtn.Text = "SPIN"
+spinBtn.TextColor3 =
+    Color3.fromRGB(255, 255, 255)
+spinBtn.Font =
+    Enum.Font.GothamBold
+spinBtn.TextSize = 11
+spinBtn.Parent = mainFrame
+
+local spinCorner =
+    Instance.new("UICorner", spinBtn)
+
+spinCorner.CornerRadius = UDim.new(0, 7)
+
+--// Swim
+local swimBtn = Instance.new("TextButton")
+swimBtn.Size =
+    UDim2.new(0.48, -5, 0, 28)
+swimBtn.Position =
+    UDim2.new(0.52, 0, 0, 157)
+swimBtn.BackgroundColor3 =
+    Color3.fromRGB(25, 30, 40)
+swimBtn.BorderSizePixel = 0
+swimBtn.Text = "SWIM"
+swimBtn.TextColor3 =
+    Color3.fromRGB(255, 255, 255)
+swimBtn.Font =
+    Enum.Font.GothamBold
+swimBtn.TextSize = 11
+swimBtn.Parent = mainFrame
+
+local swimCorner =
+    Instance.new("UICorner", swimBtn)
+
+swimCorner.CornerRadius = UDim.new(0, 7)
+
+--// XNXX
+local xnxxBtn = Instance.new("TextButton")
+xnxxBtn.Size =
+    UDim2.new(0.48, -5, 0, 28)
+xnxxBtn.Position =
+    UDim2.new(0, 10, 0, 190)
+xnxxBtn.BackgroundColor3 =
+    Color3.fromRGB(25, 30, 40)
+xnxxBtn.BorderSizePixel = 0
+xnxxBtn.Text = "XNXX"
+xnxxBtn.TextColor3 =
+    Color3.fromRGB(255, 255, 255)
+xnxxBtn.Font =
+    Enum.Font.GothamBold
+xnxxBtn.TextSize = 11
+xnxxBtn.Parent = mainFrame
+
+local xnxxCorner =
+    Instance.new("UICorner", xnxxBtn)
+
+xnxxCorner.CornerRadius = UDim.new(0, 7)
+
+--// Copy Hat
+local copyHatBtn = Instance.new("TextButton")
+copyHatBtn.Size =
+    UDim2.new(0.48, -5, 0, 28)
+copyHatBtn.Position =
+    UDim2.new(0.52, 0, 0, 190)
+copyHatBtn.BackgroundColor3 =
+    Color3.fromRGB(25, 30, 40)
+copyHatBtn.BorderSizePixel = 0
+copyHatBtn.Text = "COPY HAT"
+copyHatBtn.TextColor3 =
+    Color3.fromRGB(255, 255, 255)
+copyHatBtn.Font =
+    Enum.Font.GothamBold
+copyHatBtn.TextSize = 11
+copyHatBtn.Parent = mainFrame
+
+local copyHatCorner =
+    Instance.new("UICorner", copyHatBtn)
+
+copyHatCorner.CornerRadius = UDim.new(0, 7)
+
+--// SHUNSHIN
+local shunshinBtn = Instance.new("TextButton")
+shunshinBtn.Size =
+    UDim2.new(0.48, -5, 0, 28)
+shunshinBtn.Position =
+    UDim2.new(0, 10, 0, 223)
+shunshinBtn.BackgroundColor3 =
+    Color3.fromRGB(25, 30, 40)
+shunshinBtn.BorderSizePixel = 0
+shunshinBtn.Text = "SHUNSHIN"
+shunshinBtn.TextColor3 =
+    Color3.fromRGB(255, 255, 255)
+shunshinBtn.Font =
+    Enum.Font.GothamBold
+shunshinBtn.TextSize = 11
+shunshinBtn.Parent = mainFrame
+
+local shunshinCorner =
+    Instance.new("UICorner", shunshinBtn)
+
+shunshinCorner.CornerRadius = UDim.new(0, 7)
+
+--// FreeCam
+local freeCamBtn = Instance.new("TextButton")
+freeCamBtn.Size =
+    UDim2.new(0.48, -5, 0, 28)
+freeCamBtn.Position =
+    UDim2.new(0.52, 0, 0, 223)
+freeCamBtn.BackgroundColor3 =
+    Color3.fromRGB(25, 30, 40)
+freeCamBtn.BorderSizePixel = 0
+freeCamBtn.Text = "FREECAM"
+freeCamBtn.TextColor3 =
+    Color3.fromRGB(255, 255, 255)
+freeCamBtn.Font =
+    Enum.Font.GothamBold
+freeCamBtn.TextSize = 11
+freeCamBtn.Parent = mainFrame
+
+local freeCamCorner =
+    Instance.new("UICorner", freeCamBtn)
+
+freeCamCorner.CornerRadius = UDim.new(0, 7)
+
+--// Shunshin Helper
+local function stopJumpAnimations(hum)
+    if not hum then
+        return
+    end
+
+    for _, track in ipairs(
+        hum:GetPlayingAnimationTracks()
+    ) do
+
+        local name =
+            string.lower(track.Name)
+
+        if string.find(name, "jump")
+            or string.find(name, "fall")
+            or string.find(name, "freefall") then
+
+            track:Stop(0)
+        end
+    end
+end
+
+--// Stop Shunshin
+local function stopShunshin()
+    shunshinActive = false
+    shunshinLoop = false
+
+    if shunshinBtn
+        and shunshinBtn.Parent then
+
+        shunshinBtn.Text = "SHUNSHIN"
+        shunshinBtn.BackgroundColor3 =
+            Color3.fromRGB(25, 30, 40)
+    end
+end
+
+--// Start Shunshin
+local function startShunshin()
+    if shunshinActive then
+        return
+    end
+
+    if not isGlitchActive then
+        if getgenv().Notify then
+            getgenv().Notify({
+                Title = "TERJADI KESALAHAN",
+                Content =
+                    "AKTIFKAN GLITCH TERLEBIH DAHULU!",
+                Duration = 2
+            })
+        end
+
+        return
+    end
+
+    shunshinActive = true
+    shunshinLoop = true
+
+    shunshinBtn.Text = "SHUNSHIN"
+    shunshinBtn.BackgroundColor3 =
+        Color3.fromRGB(70, 130, 255)
+
+    task.spawn(function()
+        while shunshinLoop
+            and shunshinActive
+            and isGlitchActive do
+
+            task.wait(0.1)
+
+            if not (
+                shunshinLoop
+                and shunshinActive
+                and isGlitchActive
+            ) then
+                break
+            end
+
+            local currentCharacter =
+                player.Character
+
+            local currentHumanoid =
+                currentCharacter
+                and
+                currentCharacter:FindFirstChildOfClass(
+                    "Humanoid"
+                )
+
+            local root =
+                currentCharacter
+                and
+                currentCharacter:FindFirstChild(
+                    "HumanoidRootPart"
+                )
+
+            if currentHumanoid
+                and root
+                and currentHumanoid.Health > 0 then
+
+                stopJumpAnimations(currentHumanoid)
+
+                local targets = {}
+
+                for _, targetPlayer in ipairs(
+                    Players:GetPlayers()
+                ) do
+
+                    if targetPlayer ~= player then
+                        local targetCharacter =
+                            targetPlayer.Character
+
+                        local targetRoot =
+                            targetCharacter
+                            and
+                            targetCharacter:FindFirstChild(
+                                "HumanoidRootPart"
+                            )
+
+                        local targetHumanoid =
+                            targetCharacter
+                            and
+                            targetCharacter:FindFirstChildOfClass(
+                                "Humanoid"
+                            )
+
+                        if targetRoot
+                            and targetHumanoid
+                            and targetHumanoid.Health > 0 then
+
+                            table.insert(
+                                targets,
+                                targetPlayer
+                            )
+                        end
+                    end
+                end
+
+                if #targets > 0 then
+                    local target =
+                        targets[
+                            math.random(
+                                1,
+                                #targets
+                            )
+                        ]
+
+                    local targetCharacter =
+                        target.Character
+
+                    local targetRoot =
+                        targetCharacter
+                        and
+                        targetCharacter:FindFirstChild(
+                            "HumanoidRootPart"
+                        )
+
+                    if targetRoot then
+
+                        root.AssemblyLinearVelocity =
+                            Vector3.zero
+
+                        root.AssemblyAngularVelocity =
+                            Vector3.zero
+
+                        currentHumanoid:ChangeState(
+                            Enum.HumanoidStateType.Running
+                        )
+
+                        root.CFrame =
+                            targetRoot.CFrame *
+                            CFrame.new(0, 2.5, 0)
+
+                        root.AssemblyLinearVelocity =
+                            Vector3.zero
+
+                        root.AssemblyAngularVelocity =
+                            Vector3.zero
+
+                        stopJumpAnimations(
+                            currentHumanoid
+                        )
+
+                        currentHumanoid:ChangeState(
+                            Enum.HumanoidStateType.Running
+                        )
+                    end
+                end
+            end
+        end
+
+        shunshinActive = false
+        shunshinLoop = false
+
+        if shunshinBtn
+            and shunshinBtn.Parent then
+
+            shunshinBtn.Text = "SHUNSHIN"
+            shunshinBtn.BackgroundColor3 =
+                Color3.fromRGB(25, 30, 40)
+        end
+    end)
+end
+
+--// Shunshin Button
+shunshinBtn.MouseButton1Click:Connect(function()
+    if not isGlitchActive then
+        if getgenv().Notify then
+            getgenv().Notify({
+                Title = "TERJADI KESALAHAN",
+                Content =
+                    "AKTIFKAN GLITCH TERLEBIH DAHULU!",
+                Duration = 2
+            })
+        end
+
+        return
+    end
+
+    if shunshinActive then
+        stopShunshin()
+
+        if getgenv().Notify then
+            getgenv().Notify({
+                Title = "SHUNSHIN NO JUTSU",
+                Content =
+                    "SHUNSHIN TELAH DIMATIKAN!",
+                Duration = 2
+            })
+        end
+    else
+        startShunshin()
+
+        if getgenv().Notify then
+            getgenv().Notify({
+                Title = "SHUNSHIN NO JUTSU",
+                Content =
+                    "SHUNSHIN TELAH DIAKTIFKAN!",
+                Duration = 2
+            })
+        end
+    end
+end)
+
+--// Glitch Button
+activateBtn.MouseButton1Click:Connect(function()
+
+    if not isGlitchActive then
+
+        LoadTrack(EMOTE_ID)
+
+        activateBtn.Text =
+            "MATIKAN GLITCH"
+
+        activateBtn.BackgroundColor3 =
+            Color3.fromRGB(70, 130, 255)
+
+        isGlitchActive = true
+
+        if getgenv().Notify then
+            getgenv().Notify({
+                Title = "SIEXTHER GLITCH",
+                Content =
+                    "GLITCH TELAH DIAKTIFKAN!",
+                Duration = 2
+            })
+        end
+
+    else
+
+        StopTrack()
+
+        -- Shunshin otomatis mati
+        stopShunshin()
+
+        activateBtn.Text =
+            "AKTIFKAN GLITCH"
+
+        activateBtn.BackgroundColor3 =
+            Color3.fromRGB(25, 30, 40)
+
+        isGlitchActive = false
+
+        if getgenv().Notify then
+            getgenv().Notify({
+                Title = "SIEXTHER GLITCH",
+                Content =
+                    "GLITCH TELAH DIMATIKAN!",
+                Duration = 2
+            })
+        end
+    end
+end)
+
+--// Speed Slider
+local function updateSpeedSlider(value)
+    Settings["Speed"] = value
+
+    speedLabel.Text =
+        string.format(
+            "SPEED GLITCH: X%.1f",
+            value
+        )
+
+    local rel =
+        math.clamp(
+            value / 10,
+            0,
+            1
+        )
+
+    TweenService:Create(
+        sliderFill,
+        TweenInfo.new(0.15),
+        {
+            Size =
+                UDim2.new(
+                    rel,
+                    0,
+                    1,
+                    0
+                )
+        }
+    ):Play()
+
+    TweenService:Create(
+        thumb,
+        TweenInfo.new(0.15),
+        {
+            Position =
+                UDim2.new(
+                    rel,
+                    0,
+                    0.5,
+                    0
+                )
+        }
+    ):Play()
+
+    if CurrentTrack
+        and CurrentTrack.IsPlaying then
+
+        CurrentTrack:AdjustSpeed(
+            Settings["Speed"]
+        )
+    end
+end
+
+local dragging = false
+
+local function updateFromInput(input)
+    local relX =
+        math.clamp(
+            (
+                input.Position.X -
+                sliderBar.AbsolutePosition.X
+            ) /
+            sliderBar.AbsoluteSize.X,
+            0,
+            1
+        )
+
+    local value =
+        math.floor(
+            (10 * relX) * 10
+        ) / 10
+
+    updateSpeedSlider(value)
+end
+
+sliderBar.InputBegan:Connect(function(input)
+    if input.UserInputType ==
+        Enum.UserInputType.MouseButton1
+        or
+        input.UserInputType ==
+        Enum.UserInputType.Touch then
+
+        dragging = true
+        updateFromInput(input)
+    end
+end)
+
+thumb.InputBegan:Connect(function(input)
+    if input.UserInputType ==
+        Enum.UserInputType.MouseButton1
+        or
+        input.UserInputType ==
+        Enum.UserInputType.Touch then
+
+        dragging = true
+        updateFromInput(input)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging
+        and (
+            input.UserInputType ==
+                Enum.UserInputType.MouseMovement
+            or
+            input.UserInputType ==
+                Enum.UserInputType.Touch
+        ) then
+
+        updateFromInput(input)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if dragging
+        and (
+            input.UserInputType ==
+                Enum.UserInputType.MouseButton1
+            or
+            input.UserInputType ==
+                Enum.UserInputType.Touch
+        ) then
+
+        dragging = false
+    end
+end)
+
+--// Spin
+local isSpinning = false
+local spinConnection
+
+spinBtn.MouseButton1Click:Connect(function()
+
+    if not isSpinning then
+
+        isSpinning = true
+
+        spinBtn.BackgroundColor3 =
+            Color3.fromRGB(70, 130, 255)
+
+        spinConnection =
+            RunService.RenderStepped:Connect(
+                function()
+                    if character
+                        and character.PrimaryPart then
+
+                        character.PrimaryPart.CFrame =
+                            character.PrimaryPart.CFrame *
+                            CFrame.Angles(
+                                0,
+                                math.rad(40),
+                                0
+                            )
+                    end
+                end
+            )
+
+    else
+
+        isSpinning = false
+
+        spinBtn.BackgroundColor3 =
+            Color3.fromRGB(25, 30, 40)
+
+        if spinConnection then
+            spinConnection:Disconnect()
+            spinConnection = nil
+        end
+    end
+end)
+
+--// Swimming
+local swimming = false
+local oldgrav = nil
+local gravReset = nil
+local swimbeat = nil
+
+local function startSwimming()
+    if player and character and humanoid then
+
+        oldgrav = workspace.Gravity
+        workspace.Gravity = 0
+
+        local function swimDied()
+
+            workspace.Gravity = oldgrav
+            swimming = false
+
+            if gravReset then
+                gravReset:Disconnect()
+                gravReset = nil
+            end
+
+            if swimbeat then
+                swimbeat:Disconnect()
+                swimbeat = nil
+            end
+
+            local enums =
+                Enum.HumanoidStateType:GetEnumItems()
+
+            local none =
+                table.find(
+                    enums,
+                    Enum.HumanoidStateType.None
+                )
+
+            if none then
+                table.remove(enums, none)
+            end
+
+            for _, v in pairs(enums) do
+                humanoid:SetStateEnabled(
+                    v,
+                    true
+                )
+            end
+        end
+
+        gravReset =
+            humanoid.Died:Connect(
+                swimDied
+            )
+
+        local enums =
+            Enum.HumanoidStateType:GetEnumItems()
+
+        local none =
+            table.find(
+                enums,
+                Enum.HumanoidStateType.None
+            )
+
+        if none then
+            table.remove(enums, none)
+        end
+
+        for _, v in pairs(enums) do
+            humanoid:SetStateEnabled(
+                v,
+                false
+            )
+        end
+
+        humanoid:ChangeState(
+            Enum.HumanoidStateType.Swimming
+        )
+
+        swimbeat =
+            RunService.Heartbeat:Connect(
+                function()
+                    pcall(function()
+
+                        if character
+                            and character:FindFirstChild(
+                                "HumanoidRootPart"
+                            ) then
+
+                            local rootPart =
+                                character.HumanoidRootPart
+
+                            if humanoid.MoveDirection
+                                ~= Vector3.new() then
+
+                                rootPart.Velocity =
+                                    Vector3.new(
+                                        0,
+                                        10,
+                                        0
+                                    )
+                            else
+
+                                rootPart.Velocity =
+                                    Vector3.zero
+                            end
+                        end
+                    end)
+                end
+            )
+
+        swimming = true
+    end
+end
+
+local function stopSwimming()
+    if swimming then
+
+        workspace.Gravity = oldgrav
+        swimming = false
+
+        if gravReset then
+            gravReset:Disconnect()
+            gravReset = nil
+        end
+
+        if swimbeat then
+            swimbeat:Disconnect()
+            swimbeat = nil
+        end
+
+        local enums =
+            Enum.HumanoidStateType:GetEnumItems()
+
+        local none =
+            table.find(
+                enums,
+                Enum.HumanoidStateType.None
+            )
+
+        if none then
+            table.remove(enums, none)
+        end
+
+        for _, v in pairs(enums) do
+            humanoid:SetStateEnabled(
+                v,
+                true
+            )
+        end
+    end
+end
+
+swimBtn.MouseButton1Click:Connect(function()
+
+    if swimming then
+
+        stopSwimming()
+
+        swimBtn.BackgroundColor3 =
+            Color3.fromRGB(25, 30, 40)
+
+    else
+
+        startSwimming()
+
+        swimBtn.BackgroundColor3 =
+            Color3.fromRGB(70, 130, 255)
+    end
+end)
+
+--// FreeCam Button
+freeCamBtn.MouseButton1Click:Connect(function()
+    loadstring(
+        game:HttpGet(
+            "https://raw.githubusercontent.com/dosxl6/n/refs/heads/main/2.lua"
+        )
+    )()
+end)
+
+--// Copy Hat
+copyHatBtn.MouseButton1Click:Connect(function()
+    loadstring(
+        game:HttpGet(
+            "https://raw.githubusercontent.com/dosxl6/n/refs/heads/main/cc.lua"
+        )
+    )()
+end)
+
+--// XNXX
+local xnxxActive = false
+local xnxxTrack = nil
+local xnxxCollisionConnection = nil
+local xnxxOriginalCollisionStates = {}
+
+local XnxxSettings = {}
+
+XnxxSettings["Stop On Move"] = false
+XnxxSettings["Fade In"] = 0.1
+XnxxSettings["Fade Out"] = 0.1
+XnxxSettings["Weight"] = 1
+XnxxSettings["Speed"] = 1
+XnxxSettings["Allow Invisible"] = true
+XnxxSettings["Time Position"] = 0
+
+local function LoadXnxxTrack(id)
+
+    if xnxxTrack then
+        xnxxTrack:Stop(0)
+    end
+
+    local animId
+
+    local ok, result =
+        pcall(function()
+            return game:GetObjects(
+                "rbxassetid://" ..
+                tostring(id)
+            )
+        end)
+
+    if ok
+        and result
+        and #result > 0 then
+
+        local anim = result[1]
+
+        if anim:IsA("Animation") then
+            animId = anim.AnimationId
+        else
+            animId =
+                "rbxassetid://" ..
+                tostring(id)
+        end
+
+    else
+
+        animId =
+            "rbxassetid://" ..
+            tostring(id)
+    end
+
+    local newAnim =
+        Instance.new("Animation")
+
+    newAnim.AnimationId = animId
+
+    local newTrack =
+        humanoid:LoadAnimation(
+            newAnim
+        )
+
+    newTrack.Priority =
+        Enum.AnimationPriority.Action4
+
+    local weight =
+        XnxxSettings["Weight"]
+
+    if weight == 0 then
+        weight = 0.001
+    end
+
+    newTrack:Play(
+        XnxxSettings["Fade In"],
+        weight,
+        XnxxSettings["Speed"]
+    )
+
+    xnxxTrack = newTrack
+
+    xnxxTrack.TimePosition =
+        math.clamp(
+            XnxxSettings["Time Position"],
+            0,
+            1
+        ) *
+        xnxxTrack.Length
+
+    return newTrack
+end
+
+local function saveXnxxCollisionStates()
+
+    xnxxOriginalCollisionStates = {}
+
+    local humanoidRootPart =
+        character:FindFirstChild(
+            "HumanoidRootPart"
+        )
+
+    for _, part in ipairs(
+        character:GetDescendants()
+    ) do
+
+        if part:IsA("BasePart")
+            and part ~= humanoidRootPart then
+
+            xnxxOriginalCollisionStates[part] =
+                part.CanCollide
+        end
+    end
+end
+
+local function disableXnxxCollisionsExceptRootPart()
+
+    if not XnxxSettings["Allow Invisible"] then
+        return
+    end
+
+    local humanoidRootPart =
+        character:FindFirstChild(
+            "HumanoidRootPart"
+        )
+
+    for _, part in ipairs(
+        character:GetDescendants()
+    ) do
+
+        if part:IsA("BasePart")
+            and part ~= humanoidRootPart then
+
+            part.CanCollide = false
+        end
+    end
+end
+
+local function restoreXnxxCollisions()
+
+    for part, state in pairs(
+        xnxxOriginalCollisionStates
+    ) do
+
+        if part and part.Parent then
+            part.CanCollide = state
+        end
+    end
+end
+
+local function startXnxx()
+
+    saveXnxxCollisionStates()
+
+    task.wait(1)
+
+    if not isGlitchActive then
+        return
+    end
+
+    xnxxTrack =
+        LoadXnxxTrack(
+            116241168989348
+        )
+
+    xnxxCollisionConnection =
+        RunService.Stepped:Connect(
+            function()
+
+                if character
+                    and character.Parent
+                    and XnxxSettings[
+                        "Allow Invisible"
+                    ] then
+
+                    disableXnxxCollisionsExceptRootPart()
+                end
+            end
+        )
+
+    xnxxActive = true
+end
+
+local function stopXnxx()
+
+    if xnxxTrack then
+        xnxxTrack:Stop(0)
+        xnxxTrack = nil
+    end
+
+    if xnxxCollisionConnection then
+        xnxxCollisionConnection:Disconnect()
+        xnxxCollisionConnection = nil
+    end
+
+    restoreXnxxCollisions()
+
+    xnxxActive = false
+end
+
+xnxxBtn.MouseButton1Click:Connect(function()
+
+    if not isGlitchActive then
+
+        if getgenv().Notify then
+            getgenv().Notify({
+                Title =
+                    "TERJADI KESALAHAN",
+                Content =
+                    "AKTIFKAN GLITCH TERLEBIH DAHULU!",
+                Duration = 2
+            })
+        end
+
+        return
+    end
+
+    if not xnxxActive then
+
+        startXnxx()
+
+        xnxxBtn.BackgroundColor3 =
+            Color3.fromRGB(
+                70,
+                130,
+                255
+            )
+
+        if getgenv().Notify then
+            getgenv().Notify({
+                Title = "XNXX",
+                Content =
+                    "XNXX TELAH DIAKTIFKAN!",
+                Duration = 2
+            })
+        end
+
+    else
+
+        stopXnxx()
+
+        xnxxBtn.BackgroundColor3 =
+            Color3.fromRGB(
+                25,
+                30,
+                40
+            )
+
+        if getgenv().Notify then
+            getgenv().Notify({
+                Title = "XNXX",
+                Content =
+                    "XNXX TELAH DIMATIKAN!",
+                Duration = 2
+            })
+        end
+    end
+end)
+
+--// Map Button
+local function updateCopyHatButton()
+
+    if isInCorrectMap() then
+
+        copyHatBtn.BackgroundColor3 =
+            Color3.fromRGB(
+                25,
+                30,
+                40
+            )
+
+        copyHatBtn.TextColor3 =
+            Color3.fromRGB(
+                255,
+                255,
+                255
+            )
+
+    else
+
+        copyHatBtn.BackgroundColor3 =
+            Color3.fromRGB(
+                25,
+                30,
+                40
+            )
+
+        copyHatBtn.TextColor3 =
+            Color3.fromRGB(
+                255,
+                255,
+                255
+            )
+    end
+end
+
+updateCopyHatButton()
+
+--// Minimize / Maximize
+minimizeBtn.MouseButton1Click:Connect(function()
+
+    mainFrame.Visible = false
+    minimizedBtn.Visible = true
+end)
+
+minimizedBtn.MouseButton1Click:Connect(function()
+
+    mainFrame.Visible = true
+    minimizedBtn.Visible = false
+
+    mainFrame.Size =
+        UDim2.new(0, 0, 0, 0)
+
+    mainFrame.Position =
+        UDim2.new(0.5, 0, 0.3, 0)
+
+    mainFrame.BackgroundTransparency = 1
+
+    SmoothTween(
+        mainFrame,
+        0.5,
+        {
+            Size =
+                UDim2.new(
+                    0,
+                    240,
+                    0,
+                    253
+                ),
+
+            Position =
+                UDim2.new(
+                    0.5,
+                    -120,
+                    0.5,
+                    -143
+                ),
+
+            BackgroundTransparency = 0
+        }
+    )
+end)
+
+--// Close
+closeBtn.MouseButton1Click:Connect(function()
+
+    StopTrack()
+
+    stopShunshin()
+
+    if spinConnection then
+        spinConnection:Disconnect()
+        spinConnection = nil
+    end
+
+    stopSwimming()
+
+    if freeCamEnabled then
+        disableFreeCam()
+    end
+
+    if xnxxActive then
+        stopXnxx()
+    end
+
+    screenGui:Destroy()
+end)
+
+--// Position Update
+RunService.RenderStepped:Connect(function()
+
+    if character
+        and character.PrimaryPart then
+
+        lastPosition =
+            character.PrimaryPart.Position
+    end
+end)
+
+--// Character Respawn
+player.CharacterAdded:Connect(function(newChar)
+
+    character = newChar
+
+    humanoid =
+        character:WaitForChild(
+            "Humanoid"
+        )
+
+    if freeCamEnabled then
+
+        task.wait(0.1)
+
+        humanoid.WalkSpeed = 0
+        humanoid.JumpPower = 0
+        humanoid.JumpHeight = 0
+    end
+
+    if xnxxActive then
+
+        task.wait(0.1)
+
+        saveXnxxCollisionStates()
+
+        task.wait(1)
+
+        if xnxxActive
+            and isGlitchActive then
+
+            xnxxTrack =
+                LoadXnxxTrack(
+                    116241168989348
+                )
+        end
+    end
+end)
